@@ -1,0 +1,57 @@
+<!--
+  ManageMate — 登録確認メール（Confirm signup）
+  Supabase: Authentication → Email Templates → "Confirm signup" の本文に貼り付け。
+  件名（Subject）: 【ManageMate】メールアドレスの確認をお願いします
+  使用変数: {{ .ConfirmationURL }}
+-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F6FA;margin:0;padding:24px 0;font-family:'Hiragino Sans','Yu Gothic',Meiryo,sans-serif;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:480px;background:#FFFFFF;border:1px solid #E4E9F0;border-radius:16px;overflow:hidden;">
+        <!-- ヘッダー -->
+        <tr>
+          <td style="background:#16233E;padding:22px 28px;">
+            <div style="font-size:20px;font-weight:700;line-height:1;">
+              <span style="color:#FFFFFF;">Manage</span><span style="color:#C9A24B;">Mate</span>
+            </div>
+            <div style="color:#AAB4C4;font-size:12px;margin-top:6px;">あなたの仕事を支える、AIパートナー</div>
+          </td>
+        </tr>
+        <!-- 本文 -->
+        <tr>
+          <td style="padding:28px;">
+            <h1 style="margin:0 0 14px;font-size:19px;color:#1B2A4A;font-weight:700;">ご登録ありがとうございます</h1>
+            <p style="margin:0 0 20px;font-size:14px;line-height:1.8;color:#5B6B80;">
+              ManageMate へのご登録を受け付けました。下のボタンからメールアドレスの確認を完了してください。確認が済むとログインできるようになります。
+            </p>
+            <!-- ボタン -->
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td align="center" style="background:#1B2A4A;border-radius:10px;">
+                  <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#FFFFFF;text-decoration:none;">
+                    メールアドレスを確認する
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:22px 0 6px;font-size:12px;line-height:1.7;color:#97A2B3;">
+              ボタンが開けない場合は、以下のURLをブラウザに貼り付けてください：
+            </p>
+            <p style="margin:0;font-size:12px;line-height:1.6;word-break:break-all;">
+              <a href="{{ .ConfirmationURL }}" target="_blank" style="color:#2E5AA8;">{{ .ConfirmationURL }}</a>
+            </p>
+          </td>
+        </tr>
+        <!-- フッター -->
+        <tr>
+          <td style="padding:18px 28px;border-top:1px solid #EDF1F6;">
+            <p style="margin:0;font-size:11px;line-height:1.7;color:#97A2B3;">
+              このメールに心当たりがない場合は、破棄してください。リンクは一定時間で無効になります。<br>
+              &copy; ManageMate
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>

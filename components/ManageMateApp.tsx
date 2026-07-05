@@ -403,7 +403,7 @@ function Ring({ size = 64, stroke = 6, pct = 0, color = C.accent2, track = C.ink
 //   ・今日の予定 … 「実際の今日」でフィルタ（下記 TODAY を実日付に）
 //   ・週の棒グラフ … 日別の完了実績を集計した値に置換
 //   ・挨拶の時刻 … 端末の現在時刻に置換（下記 hour）
-function HomeScreen({ items, masters, onOpen, onGoto }) {
+function HomeScreen({ items, masters, onOpen, onGoto, wide }) {
   const tasks = items.filter(i => i.kind === "task");
   const openTasks = tasks.filter(t => !t.done);
   const doneCnt = tasks.filter(t => t.done).length;
@@ -438,9 +438,9 @@ function HomeScreen({ items, masters, onOpen, onGoto }) {
     : "今日のタスクを整理して、優先度の高いものから着手しましょう。";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ display: wide ? "grid" : "flex", gridTemplateColumns: wide ? "1fr 1fr" : undefined, flexDirection: wide ? undefined : "column", alignItems: wide ? "start" : undefined, gap: 14 }}>
       {/* 挨拶 */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, gridColumn: wide ? "1 / -1" : undefined }}>
         <div>
           <div style={{ fontSize: 19, color: C.paper, fontWeight: 700 }}>{greet} <Sun size={17} color={C.accent2} style={{ verticalAlign: -2 }} /></div>
           <div style={{ fontSize: 12.5, color: C.dim, marginTop: 3 }}>
@@ -450,14 +450,14 @@ function HomeScreen({ items, masters, onOpen, onGoto }) {
       </div>
 
       {/* 検索 */}
-      <div onClick={() => onGoto("list")} style={{ ...searchBar, cursor: "pointer" }}>
+      <div onClick={() => onGoto("list")} style={{ ...searchBar, cursor: "pointer", gridColumn: wide ? "1 / -1" : undefined }}>
         <Search size={16} color={C.dim} />
         <span style={{ fontSize: 13.5, color: C.dimmer }}>タスク、予定、メモを検索…</span>
       </div>
 
       {/* 本日の最優先タスク */}
       {priority && (
-        <div style={cardBox}>
+        <div style={{ ...cardBox, gridColumn: wide ? "1 / -1" : undefined }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <span style={{ fontSize: 13.5, color: C.paper, fontWeight: 700 }}>本日の最優先タスク</span>
             <span style={{ fontSize: 10.5, color: C.navyDeep, background: C.accent2 + "2A", padding: "2px 8px", borderRadius: 999 }}>AIが選定</span>
@@ -575,7 +575,7 @@ function HomeScreen({ items, masters, onOpen, onGoto }) {
   );
 }
 
-function ListScreen({ items, masters, onToggle, onOpen, selectedId }) {
+function ListScreen({ items, masters, onToggle, onOpen, selectedId, wide }) {
   const [kindFilter, setKindFilter] = useState("all"); // all | task | memo | event
   const [showDone, setShowDone] = useState(false);     // 完了も表示するか（全区分共通、既定：未完了のみ）
   const [showPast, setShowPast] = useState(false);     // 過去の予定も表示するか（スケジュール、既定：非表示）
@@ -798,7 +798,9 @@ function ListScreen({ items, masters, onToggle, onOpen, selectedId }) {
             <span style={{ fontSize: 11, color: C.dimmer }}>{g.items.length}件</span>
           </div>
           )}
+          <div style={{ display: wide ? "grid" : "block", gridTemplateColumns: wide ? "1fr 1fr" : undefined, columnGap: wide ? 8 : 0 }}>
           {g.items.map(it => <ItemRow key={it.id} it={it} masters={masters} onToggle={onToggle} onOpen={onOpen} selected={selectedId === it.id} colorMode={colorMode} />)}
+          </div>
         </div>
       ))}
       {list.length === 0 && <div style={{ textAlign: "center", padding: 40, color: C.dimmer, fontSize: 13.5 }}>該当する項目がありません。</div>}
@@ -3027,13 +3029,42 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
     <div style={{ height: "100vh", overflow: "hidden", background: C.ink, display: "flex", justifyContent: "center",
       fontFamily: "'Hiragino Sans','Yu Gothic',system-ui,sans-serif" }}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} .spin{animation:spin 1s linear infinite}`}</style>
-      {/* 広い画面では アプリ本体(最大440) ＋ 右詳細パネル を横並び */}
-      <div style={{ display: "flex", width: "100%", maxWidth: wide && selected ? 820 : 440, transition: "max-width .2s", height: "100vh" }}>
+      {/* 広い画面：左サイドナビ＋ワイド本文。狭い画面：中央1カラム＋下タブ */}
+      <div style={{ display: "flex", width: "100%", maxWidth: wide ? (selected ? 1400 : 1160) : 440, transition: "max-width .2s", height: "100vh" }}>
+        {wide && (
+          <aside style={{ width: 224, flexShrink: 0, height: "100vh", background: C.inkSoft, borderRight: `1px solid ${C.inkSofter}`, display: "flex", flexDirection: "column", padding: "18px 14px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 6px 18px" }}>
+              <Logo size={34} />
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700 }}><span style={{ color: C.paper }}>Manage</span><span style={{ color: C.accent2 }}>Mate</span></div>
+                <div style={{ fontSize: 9, color: C.dimmer }}>あなたの仕事を支える、AIパートナー</div>
+              </div>
+            </div>
+            <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {nav.map(n => {
+                const active = screen === n.id || (n.id === "settings" && (screen === "master" || screen === "extcal" || screen === "notify"));
+                const Icon = n.icon;
+                return (
+                  <button key={n.id} onClick={() => setScreen(n.id)} style={{
+                    display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 10, border: "none", cursor: "pointer",
+                    background: active ? C.navyDeep : "transparent", color: active ? "#fff" : C.dim, textAlign: "left", fontSize: 13.5, fontWeight: active ? 600 : 500 }}>
+                    <Icon size={18} color={active ? C.accent2 : C.dim} /> {n.label}
+                  </button>
+                );
+              })}
+            </nav>
+            <div style={{ flex: 1 }} />
+            <button onClick={() => setNotifyOpen(true)} style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 10, border: `1px solid ${C.inkSofter}`, background: C.ink, cursor: "pointer", position: "relative", color: C.paper, fontSize: 13 }}>
+              <Bell size={17} color={C.paper} /> 通知
+              {unreadCount > 0 && <span style={{ marginLeft: "auto", minWidth: 18, height: 18, borderRadius: 999, background: C.dawn, color: "#fff", fontSize: 10, fontWeight: 700, display: "grid", placeItems: "center", padding: "0 5px" }}>{unreadCount}</span>}
+            </button>
+          </aside>
+        )}
         <div style={{ flex: 1, minWidth: 0, height: "100vh", overflow: "hidden",
           background: `radial-gradient(120% 40% at 50% 0%, #FFFFFF 0%, ${C.ink} 60%)`,
           display: "flex", flexDirection: "column" }}>
 
-          {screen !== "calendar" && (
+          {screen !== "calendar" && !wide && (
           <header style={{ padding: "20px 20px 8px", display: "flex", alignItems: "center", gap: 10 }}>
             <Logo size={40} />
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -3055,23 +3086,28 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
 
           <main style={{ flex: 1, padding: screen === "calendar" ? "0" : "10px 18px 16px", overflowY: "hidden", minHeight: 0, display: "flex", flexDirection: "column" }}>
             {screen === "chat" ? (
+              <div style={{ width: "100%", maxWidth: wide ? 820 : "none", margin: "0 auto", height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}>
               <ChatScreen masters={masters} items={items} onAddItems={addItems} onUpdateItem={updateByAI} onDeleteItems={deleteByAI} onOpenItem={setSelectedId} />
+              </div>
             ) : screen === "calendar" ? (
               <CalendarScreen items={items} masters={masters} onOpenItem={setSelectedId} extCalendars={extCalendars}
                 onNewOnDate={(isoDate) => { setCaptureStart(isoDate); setScreen("capture"); }} />
             ) : (
                 <div style={{ flex: 1, minHeight: 0, overflowY: "auto", margin: "-10px -18px -16px", padding: "10px 18px 16px" }}>
-                  {screen === "home" && <HomeScreen items={items} masters={masters} onOpen={setSelectedId} onGoto={setScreen} />}
-                  {screen === "list" && <ListScreen items={items} masters={masters} onToggle={toggle} onOpen={setSelectedId} selectedId={selectedId} />}
-                  {screen === "capture" && <CaptureScreen masters={masters} onAddItem={addItem} initialStart={captureStart} onConsumeInitial={() => setCaptureStart("")} />}
-                  {screen === "settings" && <SettingsScreen onGotoMaster={() => setScreen("master")} onGotoExtCal={() => setScreen("extcal")} onGotoNotify={() => setScreen("notify")} extCalendars={extCalendars} notifySettings={notifySettings} onSignOut={onSignOut} userEmail={userEmail} />}
-                  {screen === "master" && <MasterScreen masters={masters} setMasters={setMasters} onBack={() => setScreen("settings")} />}
-                  {screen === "extcal" && <ExtCalendarScreen extCalendars={extCalendars} setExtCalendars={setExtCalendars} onBack={() => setScreen("settings")} />}
-                  {screen === "notify" && <NotifySettingsScreen settings={notifySettings} setSettings={setNotifySettings} onBack={() => setScreen("settings")} />}
+                  <div style={{ maxWidth: wide ? 980 : "none", margin: "0 auto", width: "100%" }}>
+                  {screen === "home" && <HomeScreen items={items} masters={masters} onOpen={setSelectedId} onGoto={setScreen} wide={wide} />}
+                  {screen === "list" && <ListScreen items={items} masters={masters} onToggle={toggle} onOpen={setSelectedId} selectedId={selectedId} wide={wide} />}
+                  {screen === "capture" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><CaptureScreen masters={masters} onAddItem={addItem} initialStart={captureStart} onConsumeInitial={() => setCaptureStart("")} /></div>}
+                  {screen === "settings" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><SettingsScreen onGotoMaster={() => setScreen("master")} onGotoExtCal={() => setScreen("extcal")} onGotoNotify={() => setScreen("notify")} extCalendars={extCalendars} notifySettings={notifySettings} onSignOut={onSignOut} userEmail={userEmail} /></div>}
+                  {screen === "master" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><MasterScreen masters={masters} setMasters={setMasters} onBack={() => setScreen("settings")} /></div>}
+                  {screen === "extcal" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><ExtCalendarScreen extCalendars={extCalendars} setExtCalendars={setExtCalendars} onBack={() => setScreen("settings")} /></div>}
+                  {screen === "notify" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><NotifySettingsScreen settings={notifySettings} setSettings={setNotifySettings} onBack={() => setScreen("settings")} /></div>}
+                  </div>
                 </div>
               )}
           </main>
 
+          {!wide && (
           <nav style={{ flexShrink: 0, display: "flex", padding: "8px 8px 20px", borderTop: `1px solid ${C.inkSofter}`,
             background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)" }}>
             {nav.map(n => {
@@ -3092,6 +3128,7 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
               );
             })}
           </nav>
+          )}
         </div>
 
         {/* 詳細パネル：広い画面は右に並べ、狭い画面は下シート */}
