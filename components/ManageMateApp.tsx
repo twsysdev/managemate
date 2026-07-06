@@ -11,7 +11,7 @@
 //   lib/types.ts の型を適用しながら @ts-nocheck を外していく。
 //
 // 本番化で差し替える主な箇所（引き継ぎ書 セクション4 参照）:
-//   - window.claude.complete → 自前APIエンドポイント（フェーズ3）
+//   - AI呼び出しは /api/ai（サーバー）経由で Anthropic を呼ぶ（フェーズ3・実装済み）
 //   - React state → Supabase（フェーズ2）
 //   - デモ基準日 "2026-06-29" 固定 → 実日付
 // ─────────────────────────────────────────────────────────────
@@ -947,11 +947,25 @@ function FilterSheet({ masters, fA, setFA, fB, setFB, fC, setFC, sort, setSort, 
   );
 }
 
+// ── AIバックエンド呼び出し（サーバーの /api/ai 経由で Anthropic を呼ぶ）──
+// APIキーはサーバー専用の環境変数（ANTHROPIC_API_KEY）でのみ扱う。フロントには出さない。
+// キー未設定・通信失敗・空応答時は例外を投げ、呼び出し側でローカル簡易応答にフォールバックする。
+async function completeAI(prompt) {
+  const res = await fetch("/api/ai", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  if (!res.ok) throw new Error("AI request failed: " + res.status);
+  const data = await res.json();
+  const text = typeof data?.text === "string" ? data.text : "";
+  if (!text) throw new Error("AI empty response");
+  return text;
+}
+
 // ── AI振り分け：自然文 → タスク/メモ判定・分類・タイトル・詳細 ──
 // ユーザー定義の分類マスタを渡し、その中の id から選ばせる（勝手な分類を作らせない）。
-// プレビュー環境では window.claude.complete を使用。
-// 本番では自分のバックエンド経由で Anthropic API を呼ぶ形に差し替える
-//   （APIキーは必ずサーバ側の環境変数に置く。フロントに置かない）。
+// AIは /api/ai（サーバー）経由で呼ぶ。
 async function analyzeWithAI(text, masters) {
   const axisDesc = ["A", "B", "C"].map(ax =>
     `分類${ax}（${masters[ax].name}）の選択肢: ` +
@@ -974,7 +988,7 @@ ${axisDesc}
 返すJSONの形式:
 {"kind":"task|memo","title":"...","A":"<id>","B":"<id>","C":"<id>","detail1":"...","detail2":"..."}`;
 
-  const raw = await window.claude.complete(prompt);
+  const raw = await completeAI(prompt);
   const parsed = parseAIJson(raw);
 
   // 返ってきた id がマスタに存在するか検証。なければ先頭にフォールバック
@@ -1076,7 +1090,7 @@ function parseAIJson(raw) {
 
 // ── チャット：会話＋アクション（登録/検索）をAIに判断させる ──
 // 返答テキストと、必要に応じた action(JSON) を受け取る。
-// 本番では window.claude.complete を自分のバックエンド経由のAPI呼び出しに差し替える。
+// AIは completeAI()（サーバーの /api/ai 経由）で呼ぶ。
 async function chatWithAI(history, userText, masters, items, hasFiles) {
   const axisDesc = ["A", "B", "C"].map(ax =>
     `分類${ax}（${masters[ax].name}）: ` + masters[ax].items.map(it => `{id:"${it.id}",label:"${it.label}"}`).join(", ")
@@ -1142,15 +1156,12 @@ ${userText}
 - 日時は "YYYY-MM-DDTHH:MM"（終日は "YYYY-MM-DD"）。今日は${new Date().toISOString().slice(0,10)}とする。曜日計算は正確に行う。
 - replyは常に必須。何をしたか一言添える。`;
 
-  // window.claude.complete が使えない環境では、簡易ルールでローカル応答を返す
-  if (typeof window === "undefined" || !window.claude || typeof window.claude.complete !== "function") {
-    return localFallbackChat(userText, masters, items);
-  }
+  // サーバーの /api/ai 経由でAIを呼ぶ。APIキー未設定・通信失敗・空応答時は
+  // ローカルの簡易ルール応答（localFallbackChat）にフォールバックする。
   let raw;
   try {
-    raw = await window.claude.complete(prompt);
+    raw = await completeAI(prompt);
   } catch (e) {
-    // プレビュー基盤側のエラー（Invalid response format 等）— ローカル簡易応答にフォールバック
     return localFallbackChat(userText, masters, items);
   }
   let parsed;
