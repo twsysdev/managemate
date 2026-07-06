@@ -3209,4 +3209,4 @@ const pill = (on) => ({ padding: "6px 12px", borderRadius: 999, fontSize: 12, cu
 const bigToggle = (active) => ({ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
   padding: "11px 0", borderRadius: 12, fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap",
   border: `1px solid ${active ? C.gold + "55" : C.inkSofter}`,
-  background: active ? C.gold + "14" : "transparent", color: active ? C.
+  background: active ? C.gold + "14" : "transparent", color: active ? C.goldSoft : C.dim });
