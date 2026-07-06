@@ -23,7 +23,7 @@ import { useGoogleCalendar } from "@/lib/useGoogleCalendar";
 import {
   Check, Clock, Plus, Send, ListChecks, StickyNote, Calendar as Cal,
   ChevronLeft, ChevronRight, Search, Pin, Tag,
-  Database, Paperclip, X, Pencil, Trash2, Bold, Palette, FileText, Upload,
+  Database, Paperclip, X, Pencil, Trash2, Bold, Palette, FileText, Upload, Copy,
   Sparkles, Loader, Wand2, ArrowLeft, MessageCircle, CornerDownLeft, Settings, LogOut,
   Home, Star, Bell, Sun, TrendingUp, ChevronRight as ChevR, Sliders
 } from "lucide-react";
@@ -1556,7 +1556,7 @@ function SearchResult({ action, items, masters, onOpenItem }) {
 
 // ── 画面：入力（おまかせ / 登録フォーム / マスタ 切替）──
 // データは単一DB(items)。区分(recKind: task|memo|event)はフォーム内トグルで選ぶ。
-function CaptureScreen({ masters, onAddItem, initialStart, onConsumeInitial }) {
+function CaptureScreen({ masters, onAddItem, initialStart, onConsumeInitial, initialDraft, onConsumeInitialDraft }) {
   const [recKind, setRecKind] = useState("task"); // task | memo | event（登録する区分）
   const [title, setTitle] = useState("");
   const [A, setA] = useState("");   // 分類は既定「指定なし」（任意）
@@ -1579,6 +1579,23 @@ function CaptureScreen({ masters, onAddItem, initialStart, onConsumeInitial }) {
       onConsumeInitial && onConsumeInitial();
     }
   }, [initialStart]);
+
+  React.useEffect(() => {
+    if (initialDraft) {
+      setRecKind(initialDraft.kind || "task");
+      setTitle(initialDraft.title || "");
+      setA(initialDraft.A || "");
+      setB(initialDraft.B || "");
+      setCc(initialDraft.C || "");
+      setD1(initialDraft.detail1 || "");
+      setD2(initialDraft.detail2 || "");
+      setStart(initialDraft.start || "");
+      setEnd(initialDraft.end || "");
+      setNotify(initialDraft.notify ?? null);
+      setFiles(Array.isArray(initialDraft.files) ? [...initialDraft.files] : []);
+      onConsumeInitialDraft && onConsumeInitialDraft();
+    }
+  }, [initialDraft]);
 
   function pickFiles(e) {
     const names = Array.from(e.target.files || []).map(f => f.name);
@@ -2845,7 +2862,7 @@ function Select({ value, onChange, options, small, colorize, allowEmpty }) {
 }
 
 // ── 詳細パネル：その場で編集・保存・削除 ──
-function DetailPanel({ item, masters, onClose, onSave, onDelete, onToggle, wide }) {
+function DetailPanel({ item, masters, onClose, onSave, onDelete, onDuplicate, onToggle, wide }) {
   // item が変わるたびにローカル編集状態を初期化
   const [draft, setDraft] = useState(item);
   const fileInput = useRef(null);
@@ -2964,11 +2981,18 @@ function DetailPanel({ item, masters, onClose, onSave, onDelete, onToggle, wide 
             </div>
           </div>
 
-          <button onClick={() => onDelete(draft.id)} style={{
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px", width: "100%", marginTop: 12,
-            borderRadius: 10, border: `1px solid ${C.dawn}44`, background: "transparent", color: C.dawn, fontSize: 13, cursor: "pointer" }}>
-            <Trash2 size={14} /> この{draft.kind === "task" ? "タスク" : draft.kind === "memo" ? "メモ" : "スケジュール"}を削除
-          </button>
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button onClick={() => onDuplicate(draft)} style={{
+              flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px",
+              borderRadius: 10, border: `1px solid ${C.mist}55`, background: `${C.mist}12`, color: C.mist, fontSize: 13, cursor: "pointer" }}>
+              <Copy size={14} /> この{draft.kind === "task" ? "タスク" : draft.kind === "memo" ? "メモ" : "スケジュール"}を複製
+            </button>
+            <button onClick={() => onDelete(draft.id)} style={{
+              flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px",
+              borderRadius: 10, border: `1px solid ${C.dawn}44`, background: "transparent", color: C.dawn, fontSize: 13, cursor: "pointer" }}>
+              <Trash2 size={14} /> この{draft.kind === "task" ? "タスク" : draft.kind === "memo" ? "メモ" : "スケジュール"}を削除
+            </button>
+          </div>
         </div>
 
         {/* 保存バー */}
@@ -3006,6 +3030,7 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
   const notifications = buildNotifications(items, notifySettings, NOW);
   const unreadCount = notifications.filter(n => n.past).length; // 発火済み＝未読相当（デモ）
   const [captureStart, setCaptureStart] = useState(""); // カレンダーから日付指定で入力する際の初期開始日時
+  const [captureDraft, setCaptureDraft] = useState(null); // 複製から入力画面へ渡す初期内容
   const [wide, setWide] = useState(false);
 
   // 画面幅で右パネル / 下シートを出し分け（880px以上で右パネル）
@@ -3039,6 +3064,19 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
   const deleteByAI = _itemsApi.deleteItems;  // AIチャットからの削除（複数id）
   const saveItem = (draft) => { _itemsApi.saveItem(draft); setSelectedId(null); };
   const deleteItem = (id) => { _itemsApi.deleteItem(id); setSelectedId(null); };
+  // 複製：内容を入力フォームに反映して入力画面へ遷移。完了状態・IDは引き継がず、タイトルに「（コピー）」を付与
+  const duplicateItem = (src) => {
+    setCaptureDraft({
+      kind: src.kind, title: (src.title || "") + "（コピー）",
+      A: src.A, B: src.B, C: src.C,
+      detail1: src.detail1, detail2: src.detail2,
+      start: src.start, end: src.end,
+      notify: src.notify ?? null,
+      files: Array.isArray(src.files) ? [...src.files] : [],
+    });
+    setSelectedId(null);
+    setScreen("capture");
+  };
 
   const selected = items.find(i => i.id === selectedId) || null;
 
@@ -3123,7 +3161,7 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
                   <div style={{ maxWidth: wide ? 980 : "none", margin: "0 auto", width: "100%" }}>
                   {screen === "home" && <HomeScreen items={items} masters={masters} onOpen={setSelectedId} onGoto={setScreen} wide={wide} />}
                   {screen === "list" && <ListScreen items={items} masters={masters} onToggle={toggle} onOpen={setSelectedId} selectedId={selectedId} wide={wide} />}
-                  {screen === "capture" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><CaptureScreen masters={masters} onAddItem={addItem} initialStart={captureStart} onConsumeInitial={() => setCaptureStart("")} /></div>}
+                  {screen === "capture" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><CaptureScreen masters={masters} onAddItem={addItem} initialStart={captureStart} onConsumeInitial={() => setCaptureStart("")} initialDraft={captureDraft} onConsumeInitialDraft={() => setCaptureDraft(null)} /></div>}
                   {screen === "settings" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><SettingsScreen onGotoMaster={() => setScreen("master")} onGotoExtCal={() => setScreen("extcal")} onGotoNotify={() => setScreen("notify")} extCalendars={extCalendars} notifySettings={notifySettings} onSignOut={onSignOut} userEmail={userEmail} /></div>}
                   {screen === "master" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><MasterScreen masters={masters} setMasters={setMasters} onBack={() => setScreen("settings")} /></div>}
                   {screen === "extcal" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><ExtCalendarScreen extCalendars={extCalendars} connected={_gcal.connected} email={_gcal.email} loading={_gcal.loading} onConnect={_gcal.connect} onDisconnect={_gcal.disconnect} onBack={() => setScreen("settings")} /></div>}
@@ -3160,14 +3198,14 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
         {/* 詳細パネル：広い画面は右に並べ、狭い画面は下シート */}
         {selected && wide && (
           <DetailPanel item={selected} masters={masters} wide
-            onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onToggle={toggle} />
+            onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onDuplicate={duplicateItem} onToggle={toggle} />
         )}
       </div>
 
       {/* 狭い画面用の下シート（全幅オーバーレイ） */}
       {selected && !wide && (
         <DetailPanel item={selected} masters={masters} wide={false}
-          onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onToggle={toggle} />
+          onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onDuplicate={duplicateItem} onToggle={toggle} />
       )}
 
       {notifyOpen && (
