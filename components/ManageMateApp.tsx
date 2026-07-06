@@ -19,6 +19,7 @@
 import React, { useState, useRef } from "react";
 import { useItems } from "@/lib/useItems";
 import { useSettings } from "@/lib/useSettings";
+import { useGoogleCalendar } from "@/lib/useGoogleCalendar";
 import {
   Check, Clock, Plus, Send, ListChecks, StickyNote, Calendar as Cal,
   ChevronLeft, ChevronRight, Search, Pin, Tag,
@@ -424,7 +425,7 @@ function HomeScreen({ items, masters, onOpen, onGoto, wide }) {
   }) || openTasks[0];
 
   // 【本番】"2026-06-29" を実際の今日（new Date()）に置き換え、下の timed を today で絞り込む
-  const TODAY = "2026-06-29"; // デモの基準日
+  const TODAY = ymd(new Date());
   // 今日の予定：時刻を持つ項目を時刻順に上位4件
   // 【本番】.filter(i => (i.start||"").startsWith(today)) を有効化して当日のみ表示
   const timed = items.filter(i => i.start /* && i.start.startsWith(TODAY) */)
@@ -436,7 +437,7 @@ function HomeScreen({ items, masters, onOpen, onGoto, wide }) {
   // 【本番】日別の「完了タスク数」等を集計して { d, v } に格納（v は 0〜1 に正規化）
   const week = [{ d: "月", v: 0.8 }, { d: "火", v: 1.0 }, { d: "水", v: 0.6 }, { d: "木", v: 0.9 }, { d: "金", v: 0.7 }, { d: "土", v: 0.3 }, { d: "日", v: 0.4 }];
 
-  const hour = 9; // ダミー。【本番】new Date().getHours() に置き換え
+  const hour = new Date().getHours();
   const greet = hour < 11 ? "おはようございます" : hour < 17 ? "こんにちは" : "こんばんは";
 
   // 【本番】AI提案文はここでバックエンドから取得したテキストを使う（下の固定文言を置換）
@@ -596,7 +597,7 @@ function ListScreen({ items, masters, onToggle, onOpen, selectedId, wide }) {
   const [sortDir, setSortDir] = useState("asc"); // asc | desc（デフォルト以外で有効）
   const [colorMode, setColorMode] = useState("class"); // class（②分類、既定）| kind（①区分）
 
-  const TODAY = "2026-06-29"; // デモの基準日（本番は実際の今日）
+  const TODAY = ymd(new Date());
 
   let list = items;
   if (kindFilter !== "all") list = list.filter(i => i.kind === kindFilter);
@@ -990,7 +991,7 @@ function localFallbackChat(userText, masters, items) {
   const a0 = masters.A.items[0].id, b0 = masters.B.items[0].id, c0 = masters.C.items[0].id;
 
   // 日付表現をざっくり解釈（基準日 2026-06-29）
-  const base = new Date(2026, 5, 29);
+  const base = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const toYmd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   let dateStr = "";
@@ -1134,7 +1135,7 @@ ${userText}
   ・開始日と時刻、タイトル、分類
   条件が出そろったら、その繰り返しに該当する日付を自分で列挙し、register の items に「1回ごとに1件ずつ」複数件を入れて返す（例: 毎週月曜10時×8回 → 8件）。生成しすぎない（多くても52件程度まで）。各itemのtitleは同じで良い。日付はstartに個別の日時、必要ならendも設定。
 - 相談・雑談・質問など不要なら action は null。
-- 日時は "YYYY-MM-DDTHH:MM"（終日は "YYYY-MM-DD"）。今日は2026-06-29とする。曜日計算は正確に行う。
+- 日時は "YYYY-MM-DDTHH:MM"（終日は "YYYY-MM-DD"）。今日は${new Date().toISOString().slice(0,10)}とする。曜日計算は正確に行う。
 - replyは常に必須。何をしたか一言添える。`;
 
   // window.claude.complete が使えない環境では、簡易ルールでローカル応答を返す
@@ -1746,84 +1747,72 @@ function SettingsScreen({ onGotoMaster, onGotoExtCal, onGotoNotify, extCalendars
 
 // ── 画面：連携カレンダー管理 ──
 // ダミー実装。本番では登録URL/メールから iCal取得 or Google Calendar API(OAuth) で連携する。
-function ExtCalendarScreen({ extCalendars, setExtCalendars, onBack }) {
-  const [newUrl, setNewUrl] = useState("");
-  const [adding, setAdding] = useState(false);
-  const palette = ["#4285F4", "#0B8043", "#F4B400", "#DB4437", "#8E24AA", "#00897B"];
-
-  const toggle = (id) => setExtCalendars(cals => cals.map(c => c.id === id ? { ...c, enabled: !c.enabled } : c));
-  const remove = (id) => setExtCalendars(cals => cals.filter(c => c.id !== id));
-  function add() {
-    const v = newUrl.trim();
-    if (!v) return;
-    const isUrl = v.startsWith("http");
-    const cal = {
-      id: "cal-" + Date.now(),
-      name: isUrl ? "新しいカレンダー（iCal）" : v.split("@")[0] + " のカレンダー",
-      color: palette[extCalendars.length % palette.length],
-      source: v, enabled: true, events: [],
-    };
-    setExtCalendars(cals => [...cals, cal]);
-    setNewUrl(""); setAdding(false);
-  }
-
+function ExtCalendarScreen({ extCalendars = [], connected, email, loading, onConnect, onDisconnect, onBack }) {
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 2px 8px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 2px 12px" }}>
         <button onClick={onBack} style={{ ...iconBtn, width: 32, height: 32 }}><ArrowLeft size={15} color={C.dim} /></button>
         <div>
           <h1 style={{ margin: 0, fontSize: 20, color: C.paper, fontWeight: 700 }}>連携カレンダー</h1>
-          <div style={{ fontSize: 12.5, color: C.dim, marginTop: 2 }}>Googleカレンダー等を連携して予定を表示</div>
+          <div style={{ fontSize: 12.5, color: C.dim, marginTop: 2 }}>Googleカレンダーの予定を表示</div>
         </div>
       </div>
 
-      {/* 登録済みカレンダー */}
-      <div style={{ background: C.inkSoft, border: `1px solid ${C.inkSofter}`, borderRadius: 16, overflow: "hidden", marginBottom: 14 }}>
-        {extCalendars.length === 0 && (
-          <div style={{ padding: 20, textAlign: "center", color: C.dimmer, fontSize: 13 }}>連携中のカレンダーはありません。</div>
-        )}
-        {extCalendars.map((c, i) => (
-          <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "13px 15px",
-            borderBottom: i < extCalendars.length - 1 ? `1px solid ${C.inkSofter}` : "none" }}>
-            <span style={{ width: 12, height: 12, borderRadius: 3, background: c.color, flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, color: C.paper, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
-              <div style={{ fontSize: 11, color: C.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.source}・{c.events.length}件</div>
+      {loading ? (
+        <div style={{ padding: 30, color: C.dimmer, fontSize: 13, display: "flex", gap: 8, alignItems: "center", justifyContent: "center" }}>
+          <Loader size={16} className="spin" /> 読み込み中…
+        </div>
+      ) : connected ? (
+        <>
+          <div style={{ background: C.inkSoft, border: `1px solid ${C.mist}55`, borderRadius: 14, padding: "14px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: C.mist + "1A", display: "grid", placeItems: "center", flexShrink: 0 }}>
+              <Check size={18} color={C.mist} />
             </div>
-            {/* 表示ON/OFFトグル */}
-            <button onClick={() => toggle(c.id)} style={{
-              width: 40, height: 23, borderRadius: 999, border: "none", cursor: "pointer", flexShrink: 0, position: "relative",
-              background: c.enabled ? C.gold : C.inkSofter, transition: "background .15s" }}>
-              <span style={{ position: "absolute", top: 2, left: c.enabled ? 19 : 2, width: 19, height: 19, borderRadius: "50%",
-                background: "#fff", transition: "left .15s", boxShadow: "0 1px 3px rgba(0,0,0,.2)" }} />
-            </button>
-            <button onClick={() => remove(c.id)} style={miniBtn}><Trash2 size={14} color={C.dawn} /></button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, color: C.paper, fontWeight: 600 }}>Googleと連携中</div>
+              <div style={{ fontSize: 12, color: C.dim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email || "（アカウント）"}</div>
+            </div>
+            <button onClick={onDisconnect} style={{ ...ghostBtnFull, padding: "8px 12px", color: C.dawn, borderColor: C.dawn + "55" }}>連携を解除</button>
           </div>
-        ))}
-      </div>
 
-      {/* 追加 */}
-      {adding ? (
-        <div style={{ background: C.inkSoft, border: `1px solid ${C.inkSofter}`, borderRadius: 16, padding: 14, marginBottom: 14 }}>
-          <div style={{ fontSize: 12.5, color: C.dim, marginBottom: 8 }}>iCal URL、またはGoogleアカウントのメールアドレスを入力</div>
-          <input value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://…/basic.ics または you@gmail.com"
-            style={{ ...inputStyle, marginBottom: 10 }} />
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => { setAdding(false); setNewUrl(""); }} style={ghostBtnFull}>キャンセル</button>
-            <button onClick={add} style={{ ...primaryBtn, marginTop: 0, flex: 1, justifyContent: "center" }}>連携する</button>
+          <div style={{ fontSize: 11.5, color: C.dim, margin: "0 2px 8px" }}>取得したカレンダー（{extCalendars.length}件）</div>
+          <div style={{ background: C.inkSoft, border: `1px solid ${C.inkSofter}`, borderRadius: 16, overflow: "hidden", marginBottom: 14 }}>
+            {extCalendars.length === 0 && (
+              <div style={{ padding: 20, textAlign: "center", color: C.dimmer, fontSize: 13 }}>カレンダーが見つかりませんでした。</div>
+            )}
+            {extCalendars.map((c, i) => (
+              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "13px 15px", borderBottom: i < extCalendars.length - 1 ? `1px solid ${C.inkSofter}` : "none" }}>
+                <span style={{ width: 12, height: 12, borderRadius: 3, background: c.color, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, color: C.paper, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
+                  <div style={{ fontSize: 11, color: C.dimmer }}>{c.events.length}件の予定</div>
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
+          <div style={{ fontSize: 11.5, color: C.dimmer, lineHeight: 1.7, padding: "0 4px" }}>
+            ※ 予定は読み取り専用で表示します。カレンダー画面のフィルタで各カレンダーの表示ON/OFFを切り替えられます。
+          </div>
+        </>
       ) : (
-        <button onClick={() => setAdding(true)} style={{
-          width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "12px",
-          borderRadius: 12, border: `1px dashed ${C.line}`, background: "transparent", color: C.gold, fontSize: 13.5, cursor: "pointer", marginBottom: 14 }}>
-          <Plus size={15} /> カレンダーを連携
-        </button>
+        <>
+          <div style={{ background: C.inkSoft, border: `1px solid ${C.inkSofter}`, borderRadius: 16, padding: 22, textAlign: "center", marginBottom: 14 }}>
+            <div style={{ width: 46, height: 46, borderRadius: 12, background: C.gold + "12", display: "grid", placeItems: "center", margin: "0 auto 12px" }}>
+              <Cal size={22} color={C.gold} />
+            </div>
+            <div style={{ fontSize: 14.5, color: C.paper, fontWeight: 600, marginBottom: 6 }}>Googleカレンダーを連携</div>
+            <p style={{ margin: "0 0 16px", fontSize: 12.5, color: C.dim, lineHeight: 1.7 }}>
+              連携すると、あなたのGoogleカレンダーの予定がこのアプリのカレンダーに表示されます。ボタンを押すとGoogleの同意画面が開きます。
+            </p>
+            <button onClick={onConnect} style={{ ...primaryBtn, marginTop: 0, width: "100%", justifyContent: "center" }}>
+              <Cal size={15} /> Googleと連携する
+            </button>
+          </div>
+          <div style={{ fontSize: 11.5, color: C.dimmer, lineHeight: 1.7, padding: "0 4px" }}>
+            ※ 予定の読み取り（表示）のみ行います。パスワードやAPIキーの入力は不要です。
+          </div>
+        </>
       )}
-
-      <div style={{ fontSize: 11.5, color: C.dimmer, lineHeight: 1.7, padding: "0 4px" }}>
-        ※ プレビューでは連携をダミー表示しています。実際の連携（Google Calendar / iCal の取得、Google Meet URLの発行）は、本番環境でのOAuth認証・API接続が必要です。
-      </div>
     </div>
   );
 }
@@ -2280,8 +2269,8 @@ function weekLabel(weekStart) {
 // ── 画面：カレンダー（月＝タイトル帯 / 週＝時間軸グリッド、Googleカレンダー風） ──
 function CalendarScreen({ items, masters, onOpenItem, onNewOnDate, extCalendars = [] }) {
   const [view, setView] = useState("month"); // month | week
-  const [sel, setSel] = useState(new Date(2026, 5, 29));        // 選択日(Date)
-  const [cursor, setCursor] = useState(new Date(2026, 5, 1));   // 表示中の月(Date, 月初)
+  const [sel, setSel] = useState(new Date());        // 選択日(Date)
+  const [cursor, setCursor] = useState(startOfMonth(new Date()));   // 表示中の月(Date, 月初)
 
   // フィルタ（一覧と共通のUI・仕様）
   const [kindFilter, setKindFilter] = useState("all"); // all | task | memo | event
@@ -3007,12 +2996,13 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
   const setMasters = _settings.setMasters;
   const notifySettings = _settings.notifySettings;
   const setNotifySettings = _settings.setNotifySettings;
-  // 連携カレンダー：実連携はフェーズ3。ダミーは撤去し空から開始
-  const [extCalendars, setExtCalendars] = useState([]);
+  // 連携カレンダー：Google連携（フェーズ3）から取得
+  const _gcal = useGoogleCalendar();
+  const extCalendars = _gcal.calendars;
   const [screen, setScreen] = useState("home");
   const [selectedId, setSelectedId] = useState(null);
   const [notifyOpen, setNotifyOpen] = useState(false); // 通知センターの開閉
-  const NOW = "2026-06-29T09:00"; // デモの現在時刻（本番は実時刻）
+  const NOW = new Date().toISOString(); // 実時刻
   const notifications = buildNotifications(items, notifySettings, NOW);
   const unreadCount = notifications.filter(n => n.past).length; // 発火済み＝未読相当（デモ）
   const [captureStart, setCaptureStart] = useState(""); // カレンダーから日付指定で入力する際の初期開始日時
@@ -3025,6 +3015,20 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
     onChange();
     mq.addEventListener ? mq.addEventListener("change", onChange) : mq.addListener(onChange);
     return () => { mq.removeEventListener ? mq.removeEventListener("change", onChange) : mq.removeListener(onChange); };
+  }, []);
+
+  // OAuthコールバック等からの ?screen= で画面を開き、URLを整える
+  React.useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const sc = params.get("screen");
+      if (sc) {
+        setScreen(sc);
+        params.delete("screen"); params.delete("gcal");
+        const qs = params.toString();
+        window.history.replaceState({}, "", window.location.pathname + (qs ? "?" + qs : ""));
+      }
+    } catch {}
   }, []);
 
   // ハンドラは useItems（Supabase同期）に委譲。UI都合の setSelectedId はここで付与。
@@ -3122,7 +3126,7 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
                   {screen === "capture" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><CaptureScreen masters={masters} onAddItem={addItem} initialStart={captureStart} onConsumeInitial={() => setCaptureStart("")} /></div>}
                   {screen === "settings" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><SettingsScreen onGotoMaster={() => setScreen("master")} onGotoExtCal={() => setScreen("extcal")} onGotoNotify={() => setScreen("notify")} extCalendars={extCalendars} notifySettings={notifySettings} onSignOut={onSignOut} userEmail={userEmail} /></div>}
                   {screen === "master" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><MasterScreen masters={masters} setMasters={setMasters} onBack={() => setScreen("settings")} /></div>}
-                  {screen === "extcal" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><ExtCalendarScreen extCalendars={extCalendars} setExtCalendars={setExtCalendars} onBack={() => setScreen("settings")} /></div>}
+                  {screen === "extcal" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><ExtCalendarScreen extCalendars={extCalendars} connected={_gcal.connected} email={_gcal.email} loading={_gcal.loading} onConnect={_gcal.connect} onDisconnect={_gcal.disconnect} onBack={() => setScreen("settings")} /></div>}
                   {screen === "notify" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><NotifySettingsScreen settings={notifySettings} setSettings={setNotifySettings} onBack={() => setScreen("settings")} /></div>}
                   </div>
                 </div>
