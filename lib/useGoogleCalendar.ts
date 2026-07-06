@@ -57,5 +57,21 @@ export function useGoogleCalendar() {
     await reload();
   }, [reload]);
 
-  return { calendars, connected, email, loading, connect, disconnect, reload };
+  const savePref = useCallback(
+    async (calendarId: string, patch: { visible?: boolean; color?: string }) => {
+      setCalendars((prev) =>
+        prev.map((c) =>
+          c.id === calendarId
+            ? { ...c, ...(patch.visible !== undefined ? { enabled: patch.visible } : {}), ...(patch.color !== undefined ? { color: patch.color } : {}) }
+            : c
+        )
+      );
+      try {
+        await fetch("/api/google/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ calendarId, ...patch }) });
+      } catch {}
+    },
+    []
+  );
+
+  return { calendars, connected, email, loading, connect, disconnect, reload, savePref };
 }

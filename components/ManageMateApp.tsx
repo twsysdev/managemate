@@ -1764,7 +1764,14 @@ function SettingsScreen({ onGotoMaster, onGotoExtCal, onGotoNotify, extCalendars
 
 // ── 画面：連携カレンダー管理 ──
 // ダミー実装。本番では登録URL/メールから iCal取得 or Google Calendar API(OAuth) で連携する。
-function ExtCalendarScreen({ extCalendars = [], connected, email, loading, onConnect, onDisconnect, onBack }) {
+// 連携カレンダーの表示色プリセット（アプリの区分色＋汎用色）。ほかにHEX直接入力も可。
+const CAL_COLOR_PRESETS = ["#C0492E", "#E0602E", "#C9A24B", "#3C7A5A", "#2FA37A", "#2E5AA8", "#6669D8", "#8B4FBE", "#6B7688", "#C64B7E"];
+
+function ExtCalendarScreen({ extCalendars = [], connected, email, loading, onConnect, onDisconnect, onSavePref, onBack }) {
+  const [pickerFor, setPickerFor] = useState(null); // 色ピッカーを開いているカレンダーid
+  const [hexDraft, setHexDraft] = useState("");
+  const openPicker = (c) => { setPickerFor(pickerFor === c.id ? null : c.id); setHexDraft(c.color || ""); };
+  const commitHex = (id) => { if (/^#[0-9a-fA-F]{6}$/.test(hexDraft)) onSavePref(id, { color: hexDraft }); };
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 2px 12px" }}>
@@ -1792,23 +1799,66 @@ function ExtCalendarScreen({ extCalendars = [], connected, email, loading, onCon
             <button onClick={onDisconnect} style={{ ...ghostBtnFull, padding: "8px 12px", color: C.dawn, borderColor: C.dawn + "55" }}>連携を解除</button>
           </div>
 
-          <div style={{ fontSize: 11.5, color: C.dim, margin: "0 2px 8px" }}>取得したカレンダー（{extCalendars.length}件）</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 2px 8px" }}>
+            <span style={{ fontSize: 11.5, color: C.dim }}>取得したカレンダー（{extCalendars.length}件）</span>
+            <span style={{ fontSize: 11, color: C.dimmer }}>チェック＝初期表示 / 右で色変更</span>
+          </div>
           <div style={{ background: C.inkSoft, border: `1px solid ${C.inkSofter}`, borderRadius: 16, overflow: "hidden", marginBottom: 14 }}>
             {extCalendars.length === 0 && (
               <div style={{ padding: 20, textAlign: "center", color: C.dimmer, fontSize: 13 }}>カレンダーが見つかりませんでした。</div>
             )}
-            {extCalendars.map((c, i) => (
-              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "13px 15px", borderBottom: i < extCalendars.length - 1 ? `1px solid ${C.inkSofter}` : "none" }}>
-                <span style={{ width: 12, height: 12, borderRadius: 3, background: c.color, flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, color: C.paper, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
-                  <div style={{ fontSize: 11, color: C.dimmer }}>{c.events.length}件の予定</div>
+            {extCalendars.map((c, i) => {
+              const on = c.enabled !== false;
+              const last = i === extCalendars.length - 1;
+              const picking = pickerFor === c.id;
+              return (
+                <div key={c.id} style={{ borderBottom: last && !picking ? "none" : `1px solid ${C.inkSofter}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 15px" }}>
+                    {/* デフォルト表示チェック */}
+                    <button onClick={() => onSavePref(c.id, { visible: !on })} title="カレンダー画面での初期表示"
+                      style={{ ...checkbox(on), border: `1.5px solid ${on ? C.mist : C.dimmer}`, background: on ? C.mist : "transparent", cursor: "pointer", flexShrink: 0 }}>
+                      {on && <Check size={13} color={C.onAccent} strokeWidth={3} />}
+                    </button>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, color: C.paper, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
+                      <div style={{ fontSize: 11, color: C.dimmer }}>{c.events.length}件の予定</div>
+                    </div>
+                    {/* 表示色ピッカー起動 */}
+                    <button onClick={() => openPicker(c)} title="表示色を変更"
+                      style={{ display: "flex", alignItems: "center", gap: 6, border: `1px solid ${picking ? C.paper : C.inkSofter}`, borderRadius: 9, padding: "5px 8px", background: C.ink, cursor: "pointer", flexShrink: 0 }}>
+                      <span style={{ width: 16, height: 16, borderRadius: 4, background: c.color }} />
+                      <span style={{ fontSize: 11, color: C.dim }}>色</span>
+                    </button>
+                  </div>
+                  {/* 色ピッカー（展開） */}
+                  {picking && (
+                    <div style={{ padding: "8px 15px 13px", background: C.ink }}>
+                      <div style={{ fontSize: 11, color: C.dim, marginBottom: 8 }}>表示色を選ぶ（プリセット / HEX）</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 9 }}>
+                        {CAL_COLOR_PRESETS.map(col => {
+                          const sel = (c.color || "").toLowerCase() === col.toLowerCase();
+                          return (
+                            <button key={col} onClick={() => onSavePref(c.id, { color: col })}
+                              style={{ width: 24, height: 24, borderRadius: 6, background: col, border: "none", cursor: "pointer",
+                                outline: sel ? `2px solid ${C.paper}` : "none", outlineOffset: 2 }} />
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 11, color: C.dim }}>HEX</span>
+                        <input value={hexDraft} onChange={e => setHexDraft(e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") commitHex(c.id); }} onBlur={() => commitHex(c.id)}
+                          placeholder="#2E5AA8" style={{ ...dtStyle, width: 120, fontFamily: "ui-monospace, Menlo, monospace" }} />
+                        <button onClick={() => setPickerFor(null)} style={{ ...ghostBtnFull, padding: "7px 12px", fontSize: 12 }}>閉じる</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div style={{ fontSize: 11.5, color: C.dimmer, lineHeight: 1.7, padding: "0 4px" }}>
-            ※ 予定は読み取り専用で表示します。カレンダー画面のフィルタで各カレンダーの表示ON/OFFを切り替えられます。
+            ※ チェックを外したカレンダーはカレンダー画面で初期非表示になります（画面側フィルタで一時的に表示切替も可）。設定は自動保存されます。
           </div>
         </>
       ) : (
@@ -3164,7 +3214,7 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
                   {screen === "capture" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><CaptureScreen masters={masters} onAddItem={addItem} initialStart={captureStart} onConsumeInitial={() => setCaptureStart("")} initialDraft={captureDraft} onConsumeInitialDraft={() => setCaptureDraft(null)} /></div>}
                   {screen === "settings" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><SettingsScreen onGotoMaster={() => setScreen("master")} onGotoExtCal={() => setScreen("extcal")} onGotoNotify={() => setScreen("notify")} extCalendars={extCalendars} notifySettings={notifySettings} onSignOut={onSignOut} userEmail={userEmail} /></div>}
                   {screen === "master" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><MasterScreen masters={masters} setMasters={setMasters} onBack={() => setScreen("settings")} /></div>}
-                  {screen === "extcal" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><ExtCalendarScreen extCalendars={extCalendars} connected={_gcal.connected} email={_gcal.email} loading={_gcal.loading} onConnect={_gcal.connect} onDisconnect={_gcal.disconnect} onBack={() => setScreen("settings")} /></div>}
+                  {screen === "extcal" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><ExtCalendarScreen extCalendars={extCalendars} connected={_gcal.connected} email={_gcal.email} loading={_gcal.loading} onConnect={_gcal.connect} onDisconnect={_gcal.disconnect} onSavePref={_gcal.savePref} onBack={() => setScreen("settings")} /></div>}
                   {screen === "notify" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><NotifySettingsScreen settings={notifySettings} setSettings={setNotifySettings} onBack={() => setScreen("settings")} /></div>}
                   </div>
                 </div>
