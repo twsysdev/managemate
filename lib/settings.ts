@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { Masters, NotifySettings } from "@/lib/types";
+import type { Masters, NotifySettings, DisplayPrefs } from "@/lib/types";
 
 // 新規ユーザーの分類マスタ（①: ラベルは空。ユーザーが自分で作る）
 export const EMPTY_MASTERS: Masters = {
@@ -18,6 +18,55 @@ export const DEFAULT_NOTIFY: NotifySettings = {
   quietEnd: "07:00",
   quietEnabled: true,
 };
+
+// 初期表示設定の既定値（現行アプリの初期挙動に合わせる）
+export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
+  calendar: {
+    view: "month",
+    kindFilter: "all",
+    colorMode: "kind",
+    hideDone: false,
+  },
+  list: {
+    kindFilter: "all",
+    sort: "default",
+    sortDir: "asc",
+    colorMode: "kind",
+    showDone: false,
+    showPast: false,
+  },
+};
+
+// 保存済みの部分設定を既定値にマージ（項目追加時の後方互換のため）
+function mergeDisplayPrefs(saved: unknown): DisplayPrefs {
+  const s = (saved ?? {}) as Partial<DisplayPrefs>;
+  return {
+    calendar: { ...DEFAULT_DISPLAY_PREFS.calendar, ...(s.calendar ?? {}) },
+    list: { ...DEFAULT_DISPLAY_PREFS.list, ...(s.list ?? {}) },
+  };
+}
+
+// ── 初期表示設定（JSONBで {calendar,list} をそのまま保持）──
+export async function fetchDisplayPrefs(): Promise<DisplayPrefs | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("display_prefs")
+    .select("data")
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mergeDisplayPrefs(data.data) : null;
+}
+
+export async function saveDisplayPrefs(userId: string, prefs: DisplayPrefs): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("display_prefs")
+    .upsert(
+      { user_id: userId, data: prefs, updated_at: new Date().toISOString() },
+      { onConflict: "user_id" }
+    );
+  if (error) throw error;
+}
 
 // ── 分類マスタ（JSONBで {A,B,C} をそのまま保持）──
 export async function fetchMasters(): Promise<Masters | null> {

@@ -31,6 +31,8 @@ export interface MasterLabel {
   /** 表示色（HEX） */
   color: string;
   deco: Deco;
+  /** 非表示フラグ。true の場合、入力・フィルタの選択肢に出さない（既存項目の表示は継続） */
+  hidden?: boolean;
 }
 
 /** 1つの分類軸（名称＋ラベル群） */
@@ -83,6 +85,40 @@ export interface NotifySettings {
   /** 静音時間帯 終了 "HH:MM" */
   quietEnd: string;
   quietEnabled: boolean;
+}
+
+/** カレンダー画面の初期表示設定 */
+export interface CalendarDisplayPrefs {
+  /** 初期ビュー */
+  view: "month" | "week";
+  /** 表示する区分 */
+  kindFilter: "all" | "task" | "memo" | "event";
+  /** 色分けの基準（区分色 / 分類色） */
+  colorMode: "kind" | "class";
+  /** 完了した項目を隠す */
+  hideDone: boolean;
+}
+
+/** 一覧画面の初期表示設定 */
+export interface ListDisplayPrefs {
+  /** 表示する区分 */
+  kindFilter: "all" | "task" | "memo" | "event";
+  /** 並び順 */
+  sort: "default" | "startAsc" | "dueAsc" | "created" | "classA" | "classB" | "classC";
+  /** 並び方向 */
+  sortDir: "asc" | "desc";
+  /** 色分けの基準（区分色 / 分類色） */
+  colorMode: "kind" | "class";
+  /** 完了した項目も表示する（false=未完了のみ） */
+  showDone: boolean;
+  /** 過去の予定も表示する（false=非表示） */
+  showPast: boolean;
+}
+
+/** 初期表示設定（カレンダー画面・一覧画面。ユーザー1人1レコード） */
+export interface DisplayPrefs {
+  calendar: CalendarDisplayPrefs;
+  list: ListDisplayPrefs;
 }
 
 /** 連携カレンダーの予定 */

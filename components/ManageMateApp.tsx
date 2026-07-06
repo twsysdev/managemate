@@ -25,7 +25,7 @@ import {
   ChevronLeft, ChevronRight, Search, Pin, Tag,
   Database, Paperclip, X, Pencil, Trash2, Bold, Palette, FileText, Upload, Copy,
   Sparkles, Loader, Wand2, ArrowLeft, MessageCircle, CornerDownLeft, Settings, LogOut,
-  Home, Star, Bell, Sun, TrendingUp, ChevronRight as ChevR, Sliders
+  Home, Star, Bell, Sun, TrendingUp, ChevronRight as ChevR, Sliders, Eye, EyeOff, ChevronUp, ChevronDown
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────
@@ -332,7 +332,9 @@ function ItemRow({ it, masters, onToggle, onOpen, selected, colorMode = "class" 
   return (
     <div onClick={() => onOpen(it.id)} style={{
       display: "flex", gap: 10, padding: "9px 12px", borderRadius: 12, marginBottom: 6, cursor: "pointer", position: "relative", overflow: "hidden",
-      background: kindMode ? `${kindColor}0E` : (bgSource ? `${bgSource.color}14` : C.inkSoft),
+      // 案5: 文字が乗る面は不透明カード（白）に統一。色味は左の縦バー＋枠線で示す（区分色モード）。
+      // 分類色モードの背景装飾(deco.bg)は従来どおり残す。
+      background: kindMode ? C.inkSoft : (bgSource ? `${bgSource.color}14` : C.inkSoft),
       border: `1px solid ${selected ? C.gold : (kindMode ? kindColor + "44" : (bgSource ? bgSource.color + "44" : C.inkSofter))}`,
       boxShadow: selected ? `0 0 0 1px ${C.gold}` : "none",
       opacity: it.done ? 0.5 : 1, transition: "border-color .15s, box-shadow .15s",
@@ -583,19 +585,21 @@ function HomeScreen({ items, masters, onOpen, onGoto, wide }) {
   );
 }
 
-function ListScreen({ items, masters, onToggle, onOpen, selectedId, wide }) {
-  const [kindFilter, setKindFilter] = useState("all"); // all | task | memo | event
-  const [showDone, setShowDone] = useState(false);     // 完了も表示するか（全区分共通、既定：未完了のみ）
-  const [showPast, setShowPast] = useState(false);     // 過去の予定も表示するか（スケジュール、既定：非表示）
+function ListScreen({ items, masters, onToggle, onOpen, selectedId, wide, displayPrefs }) {
+  // 初期表示設定（設定 > 初期表示）。未指定は現行の既定値。
+  const _dp = (displayPrefs && displayPrefs.list) || {};
+  const [kindFilter, setKindFilter] = useState(_dp.kindFilter || "all"); // all | task | memo | event
+  const [showDone, setShowDone] = useState(_dp.showDone ?? false);     // 完了も表示するか（全区分共通、既定：未完了のみ）
+  const [showPast, setShowPast] = useState(_dp.showPast ?? false);     // 過去の予定も表示するか（スケジュール、既定：非表示）
   const [q, setQ] = useState("");
   const [showSearch, setShowSearch] = useState(false); // 検索バー展開
   const [showSheet, setShowSheet] = useState(false);   // 詳細フィルタ（分類・並び替え）シート
   const [fA, setFA] = useState("");  // 分類Aフィルタ（""=指定なし）
   const [fB, setFB] = useState("");
   const [fC, setFC] = useState("");
-  const [sort, setSort] = useState("default"); // default | startAsc | dueAsc | created | classA | classB | classC
-  const [sortDir, setSortDir] = useState("asc"); // asc | desc（デフォルト以外で有効）
-  const [colorMode, setColorMode] = useState("kind"); // kind（①区分、既定）| class（②分類）
+  const [sort, setSort] = useState(_dp.sort || "default"); // default | startAsc | dueAsc | created | classA | classB | classC
+  const [sortDir, setSortDir] = useState(_dp.sortDir || "asc"); // asc | desc（デフォルト以外で有効）
+  const [colorMode, setColorMode] = useState(_dp.colorMode || "kind"); // kind（①区分、既定）| class（②分類）
 
   const TODAY = ymd(new Date());
 
@@ -833,7 +837,7 @@ function FilterSheet({ masters, fA, setFA, fB, setFB, fC, setFC, sort, setSort, 
       <div style={{ fontSize: 12, color: C.dim, marginBottom: 7 }}>{axisName(masters, ax)}</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         <button onClick={() => setter("")} style={pill(val === "")}>指定なし</button>
-        {masters[ax].items.map(o => {
+        {masters[ax].items.filter(o => !o.hidden || val === o.id).map(o => {
           const on = val === o.id;
           return (
             <button key={o.id} onClick={() => setter(o.id)} style={{
@@ -1365,10 +1369,10 @@ function ChatScreen({ masters, items, onAddItems, onUpdateItem, onDeleteItems, o
           <Paperclip size={17} color={C.dim} />
         </button>
         <input ref={fileInput} type="file" multiple onChange={pickFiles} style={{ display: "none" }} />
-        <textarea value={input} onChange={e => setInput(e.target.value)}
+        <AutoTextarea value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } }}
-          rows={1} placeholder="メッセージ（⌘/Ctrl+Enterで送信）"
-          style={{ ...inputStyle, resize: "none", maxHeight: 120, lineHeight: 1.6 }} />
+          rows={1} maxRows={10} placeholder="メッセージ（⌘/Ctrl+Enterで送信）"
+          style={{ ...inputStyle, resize: "none", lineHeight: 1.6 }} />
         <button onClick={send} disabled={busy || (!input.trim() && attachments.length === 0)} style={{
           width: 44, height: 42, borderRadius: 11, border: "none", flexShrink: 0,
           background: (busy || (!input.trim() && attachments.length === 0)) ? C.inkSofter : C.gold,
@@ -1580,6 +1584,7 @@ function CaptureScreen({ masters, onAddItem, initialStart, onConsumeInitial, ini
     }
   }, [initialStart]);
 
+  // 複製から来た場合、全項目をフォームに反映して一度だけ消費（完了状態・IDは引き継がない）
   React.useEffect(() => {
     if (initialDraft) {
       setRecKind(initialDraft.kind || "task");
@@ -1709,10 +1714,11 @@ function CaptureScreen({ masters, onAddItem, initialStart, onConsumeInitial, ini
 }
 
 // ── 画面：設定 ──
-function SettingsScreen({ onGotoMaster, onGotoExtCal, onGotoNotify, extCalendars = [], notifySettings, onSignOut, userEmail }) {
+function SettingsScreen({ onGotoMaster, onGotoExtCal, onGotoNotify, onGotoInitDisp, extCalendars = [], notifySettings, onSignOut, userEmail }) {
   const activeCal = extCalendars.filter(c => c.enabled).length;
   const rows = [
     { icon: Bell, label: "通知", desc: notifySettings?.enabled ? `オン（予定は既定${notifyLabel(notifySettings.defaultLead)}）` : "オフ", onClick: onGotoNotify },
+    { icon: Eye, label: "初期表示", desc: "カレンダー・一覧を開いたときの初期状態を設定", onClick: onGotoInitDisp },
     { icon: Database, label: "分類マスタの管理", desc: "分類A/B/Cのラベル・色・一覧装飾を設定", onClick: onGotoMaster },
     { icon: Cal, label: "連携カレンダー", desc: `Googleカレンダー等の連携・表示設定（${activeCal}件表示中）`, onClick: onGotoExtCal },
   ];
@@ -1758,6 +1764,160 @@ function SettingsScreen({ onGotoMaster, onGotoExtCal, onGotoNotify, extCalendars
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── 画面：初期表示（カレンダー画面・一覧画面のデータ表示の初期状態を定義）──
+// ここで設定した内容が、各画面を開いたときの初期状態になる。画面内で切り替えた
+// 内容はその場限りで、次に開くとここの設定に戻る。保存は明示的な「保存」ボタン。
+function InitialDisplaySettingsScreen({ displayPrefs, onSave, onBack }) {
+  const baseCal = (displayPrefs && displayPrefs.calendar) || {};
+  const baseList = (displayPrefs && displayPrefs.list) || {};
+  const [cal, setCal] = useState(() => ({ ...baseCal }));
+  const [list, setList] = useState(() => ({ ...baseList }));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const dirty = JSON.stringify(cal) !== JSON.stringify(baseCal) || JSON.stringify(list) !== JSON.stringify(baseList);
+  const setC = (patch) => { setCal(v => ({ ...v, ...patch })); setSaved(false); };
+  const setL = (patch) => { setList(v => ({ ...v, ...patch })); setSaved(false); };
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await onSave({ calendar: cal, list: list });
+      setSaved(true);
+    } catch (e) {
+      console.error("display prefs save failed", e);
+      alert("保存に失敗しました。時間をおいて再度お試しください。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // セグメント（単一選択）。options: [[value,label], ...]
+  const Seg = ({ value, onChange, options }) => (
+    <div style={{ display: "flex", background: C.ink, border: `1px solid ${C.inkSofter}`, borderRadius: 10, padding: 2, gap: 2, overflow: "hidden" }}>
+      {options.map(([v, l]) => {
+        const on = value === v;
+        return (
+          <button key={v} onClick={() => onChange(v)} style={{
+            flex: 1, minWidth: 0, border: "none", cursor: "pointer", whiteSpace: "nowrap",
+            padding: "8px 4px", borderRadius: 8, fontSize: 11.5,
+            background: on ? C.navyDeep : "transparent", color: on ? "#fff" : C.dim, fontWeight: on ? 600 : 400,
+          }}>{l}</button>
+        );
+      })}
+    </div>
+  );
+  // 選択肢が多い項目（並び順）はチップの折り返しで表示
+  const Chips = ({ value, onChange, options }) => (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {options.map(([v, l]) => (
+        <button key={v} onClick={() => onChange(v)} style={pill(value === v)}>{l}</button>
+      ))}
+    </div>
+  );
+  const Field = ({ label, children, last }) => (
+    <div style={{ padding: "12px 14px", borderBottom: last ? "none" : `1px solid ${C.line}` }}>
+      <div style={{ fontSize: 12, color: C.dim, marginBottom: 8 }}>{label}</div>
+      {children}
+    </div>
+  );
+  const card = { background: C.inkSoft, border: `1px solid ${C.inkSofter}`, borderRadius: 16, overflow: "hidden", marginBottom: 14 };
+  const cardHead = { display: "flex", alignItems: "center", gap: 9, padding: "12px 14px", borderBottom: `1px solid ${C.inkSofter}` };
+  const cardIcon = { width: 30, height: 30, borderRadius: 9, background: C.gold + "12", display: "grid", placeItems: "center", flexShrink: 0 };
+
+  const KIND_OPTS = [["all", "すべて"], ["task", "タスク"], ["memo", "メモ"], ["event", "予定"]];
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 2px 12px" }}>
+        <button onClick={onBack} style={{ ...iconBtn, width: 32, height: 32 }}><ArrowLeft size={15} color={C.dim} /></button>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 20, color: C.paper, fontWeight: 700 }}>初期表示</h1>
+          <div style={{ fontSize: 12.5, color: C.dim, marginTop: 2 }}>カレンダー・一覧を開いたときの初期状態を設定</div>
+        </div>
+      </div>
+
+      {/* 説明バナー */}
+      <div style={{ background: C.inkSoft, border: `1px solid ${C.accent2}66`, borderRadius: 14, padding: "12px 14px", display: "flex", gap: 11, marginBottom: 16 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 10, background: C.accent2 + "22", display: "grid", placeItems: "center", flexShrink: 0 }}>
+          <Eye size={16} color={C.accent2} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, color: C.paper, fontWeight: 600, marginBottom: 3 }}>画面を開いたときの既定を決めます</div>
+          <div style={{ fontSize: 11.5, color: C.dim, lineHeight: 1.65 }}>各画面のフィルタ・並び替えの「最初の状態」を定義します。データそのものは変更しません。</div>
+        </div>
+      </div>
+
+      {/* カレンダー画面 */}
+      <div style={card}>
+        <div style={cardHead}>
+          <div style={cardIcon}><Cal size={15} color={C.gold} /></div>
+          <div style={{ fontSize: 14.5, fontWeight: 600, color: C.paper }}>カレンダー画面</div>
+        </div>
+        <Field label="初期ビュー">
+          <Seg value={cal.view || "month"} onChange={v => setC({ view: v })} options={[["month", "月"], ["week", "週"]]} />
+        </Field>
+        <Field label="表示する区分">
+          <Seg value={cal.kindFilter || "all"} onChange={v => setC({ kindFilter: v })} options={KIND_OPTS} />
+        </Field>
+        <Field label="色分けの基準">
+          <Seg value={cal.colorMode || "kind"} onChange={v => setC({ colorMode: v })} options={[["kind", "区分色"], ["class", "分類色"]]} />
+        </Field>
+        <Field label="完了した項目" last>
+          <Seg value={cal.hideDone ? "hide" : "show"} onChange={v => setC({ hideDone: v === "hide" })} options={[["show", "表示する"], ["hide", "隠す"]]} />
+        </Field>
+      </div>
+
+      {/* 一覧画面 */}
+      <div style={card}>
+        <div style={cardHead}>
+          <div style={cardIcon}><ListChecks size={15} color={C.gold} /></div>
+          <div style={{ fontSize: 14.5, fontWeight: 600, color: C.paper }}>一覧画面</div>
+        </div>
+        <Field label="表示する区分">
+          <Seg value={list.kindFilter || "all"} onChange={v => setL({ kindFilter: v })} options={KIND_OPTS} />
+        </Field>
+        <Field label="並び順">
+          <Chips value={list.sort || "default"} onChange={v => setL({ sort: v })} options={[
+            ["default", "既定"], ["startAsc", "開始日"], ["dueAsc", "期日"], ["created", "登録順"],
+            ["classA", "分類A"], ["classB", "分類B"], ["classC", "分類C"],
+          ]} />
+        </Field>
+        <Field label="並び方向">
+          <Seg value={list.sortDir || "asc"} onChange={v => setL({ sortDir: v })} options={[["asc", "昇順"], ["desc", "降順"]]} />
+          <div style={{ fontSize: 10.5, color: C.dimmer, marginTop: 6 }}>※「既定」の並び順では方向指定は無効です。</div>
+        </Field>
+        <Field label="色分けの基準">
+          <Seg value={list.colorMode || "kind"} onChange={v => setL({ colorMode: v })} options={[["kind", "区分色"], ["class", "分類色"]]} />
+        </Field>
+        <Field label="完了した項目">
+          <Seg value={list.showDone ? "all" : "undone"} onChange={v => setL({ showDone: v === "all" })} options={[["undone", "未完了のみ"], ["all", "すべて表示"]]} />
+        </Field>
+        <Field label="過去の予定" last>
+          <Seg value={list.showPast ? "show" : "hide"} onChange={v => setL({ showPast: v === "show" })} options={[["hide", "隠す"], ["show", "表示する"]]} />
+        </Field>
+      </div>
+
+      {/* 保存バー */}
+      <button onClick={handleSave} disabled={!dirty || saving} style={{
+        width: "100%", padding: "13px", borderRadius: 12, border: "none",
+        background: (dirty && !saving) ? C.navyDeep : C.inkSofter, color: (dirty && !saving) ? "#fff" : C.dimmer,
+        fontSize: 14, fontWeight: 600, cursor: (dirty && !saving) ? "pointer" : "default",
+        display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7,
+      }}>
+        {saving
+          ? <><Loader size={15} className="spin" /> 保存中…</>
+          : saved && !dirty
+            ? <><Check size={15} color={C.accent2} /> 保存しました</>
+            : <><Check size={15} color={dirty ? C.accent2 : C.dimmer} /> 保存</>}
+      </button>
+      <div style={{ fontSize: 11, color: C.dimmer, lineHeight: 1.7, padding: "8px 4px 0" }}>
+        保存すると、次にカレンダー画面・一覧画面を開いたときからこの設定で表示されます。
+      </div>
     </div>
   );
 }
@@ -2142,10 +2302,26 @@ function MasterScreen({ masters, setMasters, onBack }) {
     setMasters(prev => ({ ...prev, [axis]: { ...prev[axis],
       items: prev[axis].items.map(it => it.id === id ? { ...it, deco: { ...it.deco, [key]: !it.deco[key] } } : it) } }));
   }
+  // 非表示フラグの切替
+  function toggleHidden(id) {
+    setMasters(prev => ({ ...prev, [axis]: { ...prev[axis],
+      items: prev[axis].items.map(it => it.id === id ? { ...it, hidden: !it.hidden } : it) } }));
+  }
+  // 並び替え（上下ボタン）：dir = -1（上へ）/ +1（下へ）。端ではスワップしない。
+  function move(id, dir) {
+    setMasters(prev => {
+      const arr = [...prev[axis].items];
+      const i = arr.findIndex(it => it.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= arr.length) return prev;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+      return { ...prev, [axis]: { ...prev[axis], items: arr } };
+    });
+  }
   function addLabel() {
     const id = axis.toLowerCase() + Date.now();
     setMasters(prev => ({ ...prev, [axis]: { ...prev[axis],
-      items: [...prev[axis].items, { id, label: "新しいラベル", color: "#9AA0AD", deco: { bg: false, bold: false, accent: false } }] } }));
+      items: [...prev[axis].items, { id, label: "新しいラベル", color: "#9AA0AD", deco: { bg: false, bold: false, accent: false }, hidden: false }] } }));
   }
   function remove(id) {
     setMasters(prev => ({ ...prev, [axis]: { ...prev[axis], items: prev[axis].items.filter(it => it.id !== id) } }));
@@ -2155,6 +2331,10 @@ function MasterScreen({ masters, setMasters, onBack }) {
   }
 
   const [pickerFor, setPickerFor] = useState(null); // 色選択を開いているラベルid
+  // 並び替え上下ボタンのスタイル（端では淡色・無効）
+  const rBtn = (dis) => ({ width: 26, height: 17, borderRadius: 6, padding: 0,
+    border: `1px solid ${C.inkSofter}`, background: dis ? "transparent" : C.ink,
+    display: "grid", placeItems: "center", cursor: dis ? "default" : "pointer", opacity: dis ? 0.4 : 1 });
 
   return (
     <div>
@@ -2162,7 +2342,7 @@ function MasterScreen({ masters, setMasters, onBack }) {
         {onBack && <button onClick={onBack} style={{ ...iconBtn, width: 32, height: 32 }}><ArrowLeft size={15} color={C.dim} /></button>}
         <div>
           <h1 style={{ margin: 0, fontSize: 20, color: C.paper, fontWeight: 700 }}>マスタ管理</h1>
-          <div style={{ fontSize: 12.5, color: C.dim, marginTop: 2 }}>分類のラベル・色・一覧装飾を設定</div>
+          <div style={{ fontSize: 12.5, color: C.dim, marginTop: 2 }}>分類のラベル・色・表示順・非表示・一覧装飾を設定</div>
         </div>
       </div>
       <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
@@ -2182,45 +2362,67 @@ function MasterScreen({ masters, setMasters, onBack }) {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {m.items.map(it => (
-          <div key={it.id} style={{ background: C.inkSoft, border: `1px solid ${C.inkSofter}`, borderRadius: 14, padding: 14 }}>
+        {m.items.map((it, idx) => (
+          <div key={it.id} style={{ position: "relative", background: it.hidden ? "#FBFBFD" : C.inkSoft,
+            border: `1px solid ${C.inkSofter}`, borderRadius: 14, padding: 14 }}>
+            {it.hidden && (
+              <span style={{ position: "absolute", top: -8, left: 44, fontSize: 10, fontWeight: 700, color: C.dimmer,
+                background: C.ink, border: `1px solid ${C.inkSofter}`, borderRadius: 999, padding: "2px 9px" }}>非表示</span>
+            )}
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              {/* 並び替え（上下） */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
+                <button onClick={() => move(it.id, -1)} disabled={idx === 0} title="上へ" style={rBtn(idx === 0)}>
+                  <ChevronUp size={14} color={idx === 0 ? C.dimmer : C.dim} />
+                </button>
+                <button onClick={() => move(it.id, 1)} disabled={idx === m.items.length - 1} title="下へ" style={rBtn(idx === m.items.length - 1)}>
+                  <ChevronDown size={14} color={idx === m.items.length - 1 ? C.dimmer : C.dim} />
+                </button>
+              </div>
               <input value={it.label} onChange={e => update(it.id, { label: e.target.value })}
                 style={{ ...inputStyle, flex: 1, fontWeight: 600 }} />
+              {/* 非表示トグル */}
+              <button onClick={() => toggleHidden(it.id)} style={miniBtn}
+                title={it.hidden ? "非表示中（タップで表示）" : "表示中（タップで非表示）"}>
+                {it.hidden ? <EyeOff size={14} color={C.dimmer} /> : <Eye size={14} color={C.mist} />}
+              </button>
               <button onClick={() => remove(it.id)} style={miniBtn}><Trash2 size={14} color={C.dawn} /></button>
             </div>
 
-            {/* 色選択：現在の色をタップでパレット＋自由ピッカーを開閉 */}
-            <div style={{ marginBottom: 12 }}>
-              <button onClick={() => setPickerFor(pickerFor === it.id ? null : it.id)} style={{
-                display: "flex", alignItems: "center", gap: 9, padding: "8px 11px", borderRadius: 10,
-                border: `1px solid ${C.inkSofter}`, background: C.ink, cursor: "pointer", width: "100%",
-              }}>
-                <span style={{ width: 20, height: 20, borderRadius: 6, background: it.color, flexShrink: 0,
-                  border: `1px solid ${C.line}` }} />
-                <span style={{ fontSize: 13, color: C.paper, flex: 1, textAlign: "left" }}>表示色</span>
-                <span style={{ fontSize: 12, color: C.dimmer, fontVariantNumeric: "tabular-nums" }}>{it.color.toUpperCase()}</span>
-                <ChevronRight size={14} color={C.dim} style={{ transform: pickerFor === it.id ? "rotate(90deg)" : "none", transition: "transform .15s" }} />
-              </button>
-              {pickerFor === it.id && (
-                <ColorPicker value={it.color} onChange={(c) => update(it.id, { color: c })} />
-              )}
-            </div>
+            {/* 非表示中は下の設定を淡く表示（編集は可能） */}
+            <div style={{ opacity: it.hidden ? 0.55 : 1 }}>
+              {/* 色選択：現在の色をタップでパレット＋自由ピッカーを開閉 */}
+              <div style={{ marginBottom: 12 }}>
+                <button onClick={() => setPickerFor(pickerFor === it.id ? null : it.id)} style={{
+                  display: "flex", alignItems: "center", gap: 9, padding: "8px 11px", borderRadius: 10,
+                  border: `1px solid ${C.inkSofter}`, background: C.ink, cursor: "pointer", width: "100%",
+                }}>
+                  <span style={{ width: 20, height: 20, borderRadius: 6, background: it.color, flexShrink: 0,
+                    border: `1px solid ${C.line}` }} />
+                  <span style={{ fontSize: 13, color: C.paper, flex: 1, textAlign: "left" }}>表示色</span>
+                  <span style={{ fontSize: 12, color: C.dimmer, fontVariantNumeric: "tabular-nums" }}>{it.color.toUpperCase()}</span>
+                  <ChevronRight size={14} color={C.dim} style={{ transform: pickerFor === it.id ? "rotate(90deg)" : "none", transition: "transform .15s" }} />
+                </button>
+                {pickerFor === it.id && (
+                  <ColorPicker value={it.color} onChange={(c) => update(it.id, { color: c })} />
+                )}
+              </div>
 
-            {/* 装飾トグル */}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <DecoToggle on={it.deco.bg} onClick={() => toggleDeco(it.id, "bg")} icon={<Palette size={12} />} label="背景色" />
-              <DecoToggle on={it.deco.bold} onClick={() => toggleDeco(it.id, "bold")} icon={<Bold size={12} />} label="太字" />
-              <DecoToggle on={it.deco.accent} onClick={() => toggleDeco(it.id, "accent")} icon={<Tag size={12} />} label="タイトル色" />
-            </div>
+              {/* 装飾トグル */}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <DecoToggle on={it.deco.bg} onClick={() => toggleDeco(it.id, "bg")} icon={<Palette size={12} />} label="背景色" />
+                <DecoToggle on={it.deco.bold} onClick={() => toggleDeco(it.id, "bold")} icon={<Bold size={12} />} label="太字" />
+                <DecoToggle on={it.deco.accent} onClick={() => toggleDeco(it.id, "accent")} icon={<Tag size={12} />} label="タイトル色" />
+              </div>
 
-            {/* プレビュー */}
-            <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10,
-              background: it.deco.bg ? `${it.color}14` : C.ink,
-              border: `1px solid ${it.deco.bg ? it.color + "44" : C.inkSofter}` }}>
-              <span style={{ fontSize: 13.5, color: it.deco.accent ? it.color : C.paper, fontWeight: it.deco.bold ? 700 : 400 }}>
-                一覧での見え方プレビュー
-              </span>
+              {/* プレビュー */}
+              <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10,
+                background: it.deco.bg ? `${it.color}14` : C.ink,
+                border: `1px solid ${it.deco.bg ? it.color + "44" : C.inkSofter}` }}>
+                <span style={{ fontSize: 13.5, color: it.deco.accent ? it.color : C.paper, fontWeight: it.deco.bold ? 700 : 400 }}>
+                  一覧での見え方プレビュー
+                </span>
+              </div>
             </div>
           </div>
         ))}
@@ -2334,17 +2536,19 @@ function weekLabel(weekStart) {
 }
 
 // ── 画面：カレンダー（月＝タイトル帯 / 週＝時間軸グリッド、Googleカレンダー風） ──
-function CalendarScreen({ items, masters, onOpenItem, onNewOnDate, extCalendars = [] }) {
-  const [view, setView] = useState("month"); // month | week
+function CalendarScreen({ items, masters, onOpenItem, onNewOnDate, extCalendars = [], displayPrefs }) {
+  // 初期表示設定（設定 > 初期表示）。未指定は現行の既定値。
+  const _dp = (displayPrefs && displayPrefs.calendar) || {};
+  const [view, setView] = useState(_dp.view || "month"); // month | week
   const [sel, setSel] = useState(new Date());        // 選択日(Date)
   const [cursor, setCursor] = useState(startOfMonth(new Date()));   // 表示中の月(Date, 月初)
 
   // フィルタ（一覧と共通のUI・仕様）
-  const [kindFilter, setKindFilter] = useState("all"); // all | task | memo | event
+  const [kindFilter, setKindFilter] = useState(_dp.kindFilter || "all"); // all | task | memo | event
   const [showSheet, setShowSheet] = useState(false);
   const [fA, setFA] = useState(""); const [fB, setFB] = useState(""); const [fC, setFC] = useState("");
-  const [hideDone, setHideDone] = useState(false); // 完了を隠す
-  const [colorMode, setColorMode] = useState("kind"); // kind（①区分、既定）| class（②分類）
+  const [hideDone, setHideDone] = useState(_dp.hideDone ?? false); // 完了を隠す
+  const [colorMode, setColorMode] = useState(_dp.colorMode || "kind"); // kind（①区分、既定）| class（②分類）
   // 連携カレンダーごとの表示ON/OFF（既定は各カレンダーのenabledに従う）
   const [calVisible, setCalVisible] = useState(() => Object.fromEntries(extCalendars.map(c => [c.id, c.enabled])));
 
@@ -2553,7 +2757,7 @@ function ExtEventModal({ ev, onClose }) {
 
 // 月表示：単日はセル内帯、複数日はまたがる連続バー
 function MonthGrid({ monthDates, cursor, onDay, colorOf, timeOf, sel, setSel, onOpenItem, newOn }) {
-  const MAX = 3;          // 1セルに出す行数の目安
+  const CELL_MIN_H = 72;  // セルの最小高さ（下限）。予定が多い日はこれを超えて縦に伸びる
   const BAR_H = 14;       // またがりバーの高さ
   // 7個ずつの週に分割
   const weeks = [];
@@ -2613,7 +2817,7 @@ function MonthGrid({ monthDates, cursor, onDay, colorOf, timeOf, sel, setSel, on
                   const isSel = sameYMD(sel, dt);
                   return (
                     <div key={di} onClick={() => { isSel ? newOn(dt) : setSel(dt); }} style={{
-                      minWidth: 0, minHeight: 72, borderRadius: 8, padding: 3, cursor: "pointer",
+                      minWidth: 0, minHeight: CELL_MIN_H, borderRadius: 8, padding: 3, cursor: "pointer",
                       background: isSel ? C.gold + "14" : "transparent",
                       border: `1px solid ${isSel ? C.gold + "55" : "transparent"}`,
                     }}>
@@ -2621,8 +2825,9 @@ function MonthGrid({ monthDates, cursor, onDay, colorOf, timeOf, sel, setSel, on
                         color: isSel ? C.goldSoft : C.paper, fontWeight: isSel ? 700 : 400 }}>{dt.getDate()}</div>
                       {/* またがりバーのぶん空ける */}
                       <div style={{ height: barLayerH }} />
+                      {/* 予定は打ち切らず全件表示。件数が多い日はセルが縦に伸びる（コンテンツ追従） */}
                       <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                        {singles.slice(0, MAX).map(ev => {
+                        {singles.map(ev => {
                           const col = colorOf(ev);
                           return (
                             <div key={ev.id} onClick={(e) => { e.stopPropagation(); onOpenItem(ev.id); }} style={{
@@ -2633,9 +2838,6 @@ function MonthGrid({ monthDates, cursor, onDay, colorOf, timeOf, sel, setSel, on
                             }}>{ev.title}</div>
                           );
                         })}
-                        {singles.length > MAX && (
-                          <div style={{ fontSize: 9, color: C.dim, paddingLeft: 4 }}>他{singles.length - MAX}件</div>
-                        )}
                       </div>
                     </div>
                   );
@@ -2674,7 +2876,21 @@ function MonthGrid({ monthDates, cursor, onDay, colorOf, timeOf, sel, setSel, on
 function WeekTimeline({ weekDates, onDay, colorOf, timeOf, isAllDay, sel, setSel, onOpenItem, newOn, allItems }) {
   const days = weekDates;
   const HOUR_H = 40;              // 1時間の高さ(px)
-  const START_H = 7, END_H = 22;  // 表示する時間帯 7:00-22:00
+  // 表示時間帯は既定 7:00-22:00。ただし週内の時刻付き予定に合わせて動的に拡張し、
+  // 早朝・深夜の予定が範囲外で切れないようにする（コンテンツ追従）。
+  const DEFAULT_START_H = 7, DEFAULT_END_H = 22;
+  let minH = DEFAULT_START_H, maxH = DEFAULT_END_H;
+  days.forEach(dt => {
+    const k = ymd(dt);
+    onDay(dt).filter(ev => !isAllDay(ev) && !isMultiDay(ev)).forEach(ev => {
+      const s = ev.start && ev.start.startsWith(k) && ev.start.includes("T") ? ev.start.split("T")[1] : null;
+      const e = ev.end && ev.end.startsWith(k) && ev.end.includes("T") ? ev.end.split("T")[1] : null;
+      if (s) { const h = parseInt(s.split(":")[0], 10); if (h < minH) minH = h; }
+      if (e) { const [eh, em] = e.split(":").map(Number); const ceil = em > 0 ? eh + 1 : eh; if (ceil > maxH) maxH = ceil; }
+    });
+  });
+  const START_H = Math.max(0, minH);
+  const END_H = Math.min(24, Math.max(maxH, START_H + 1));
   const hours = [];
   for (let h = START_H; h <= END_H; h++) hours.push(h);
   const gridH = (END_H - START_H) * HOUR_H;
@@ -2862,17 +3078,32 @@ function DateTimeField({ start, end, onChange }) {
   );
 }
 
-function AutoTextarea({ value, onChange, rows = 3, placeholder, style }) {
+// 自動で高さが伸びるテキストエリア。
+//  rows    … 最小高さ（既定の表示行数）
+//  maxRows … 高さ上限（この行数を超えたら固定して内部スクロール）。未指定なら無制限。
+//  それ以外の props（onKeyDown 等）は textarea へ透過。
+function AutoTextarea({ value, onChange, rows = 3, maxRows, placeholder, style, ...rest }) {
   const ref = useRef(null);
   const resize = (el) => {
     if (!el) return;
-    if (!el.value) { el.style.height = ""; return; } // 空ならrows既定高さに戻す
+    if (!el.value) { el.style.height = ""; el.style.overflowY = "hidden"; return; } // 空ならrows既定高さに戻す
     el.style.height = "auto";
-    el.style.height = el.scrollHeight + "px";
+    // 上限（px）を maxRows と実際の行高・上下パディングから算出
+    let cap = Infinity;
+    if (maxRows) {
+      const cs = window.getComputedStyle(el);
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.6;
+      const padV = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      cap = lh * maxRows + padV;
+    }
+    const h = Math.min(el.scrollHeight, cap);
+    el.style.height = h + "px";
+    el.style.overflowY = el.scrollHeight > cap ? "auto" : "hidden";
   };
   React.useEffect(() => { resize(ref.current); }, [value]);
   return (
     <textarea
+      {...rest}
       ref={ref}
       value={value}
       rows={rows}
@@ -2892,7 +3123,9 @@ function Field({ label, children, flex }) {
   );
 }
 function Select({ value, onChange, options, small, colorize, allowEmpty }) {
-  const cur = options.find(o => o.id === value);
+  // 非表示ラベルは選択肢に出さない。ただし現在選択中の値は残す（既存項目の編集で消えないように）。
+  const opts = options.filter(o => !o.hidden || o.id === value);
+  const cur = opts.find(o => o.id === value);
   const col = colorize && cur && cur.color ? cur.color : null;
   return (
     <select value={value} onChange={e => onChange(e.target.value)} style={{
@@ -2906,7 +3139,7 @@ function Select({ value, onChange, options, small, colorize, allowEmpty }) {
       ...(small ? { flex: 1, minWidth: 0 } : {}),
     }}>
       {allowEmpty && <option value="" style={{ background: C.inkSoft, color: C.dim, fontWeight: 400 }}>指定なし</option>}
-      {options.map(o => <option key={o.id} value={o.id} style={{ background: C.inkSoft, color: C.paper, fontWeight: 400 }}>{o.label}</option>)}
+      {opts.map(o => <option key={o.id} value={o.id} style={{ background: C.inkSoft, color: C.paper, fontWeight: 400 }}>{o.label}</option>)}
     </select>
   );
 }
@@ -3070,6 +3303,10 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
   const setMasters = _settings.setMasters;
   const notifySettings = _settings.notifySettings;
   const setNotifySettings = _settings.setNotifySettings;
+  // 初期表示設定（カレンダー/一覧の初期状態。ユーザーごとに永続化）
+  const displayPrefs = _settings.displayPrefs;
+  const saveDisplayPrefs = _settings.saveDisplayPrefs;
+  const prefsReady = _settings.prefsReady;
   // 連携カレンダー：Google連携（フェーズ3）から取得
   const _gcal = useGoogleCalendar();
   const extCalendars = _gcal.calendars;
@@ -3156,7 +3393,7 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
             </div>
             <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {nav.map(n => {
-                const active = screen === n.id || (n.id === "settings" && (screen === "master" || screen === "extcal" || screen === "notify"));
+                const active = screen === n.id || (n.id === "settings" && (screen === "master" || screen === "extcal" || screen === "notify" || screen === "initdisp"));
                 const Icon = n.icon;
                 return (
                   <button key={n.id} onClick={() => setScreen(n.id)} style={{
@@ -3204,15 +3441,17 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
               <ChatScreen masters={masters} items={items} onAddItems={addItems} onUpdateItem={updateByAI} onDeleteItems={deleteByAI} onOpenItem={setSelectedId} />
               </div>
             ) : screen === "calendar" ? (
-              <CalendarScreen items={items} masters={masters} onOpenItem={setSelectedId} extCalendars={extCalendars}
+              <CalendarScreen key={`cal-${prefsReady}`} items={items} masters={masters} onOpenItem={setSelectedId} extCalendars={extCalendars}
+                displayPrefs={displayPrefs}
                 onNewOnDate={(isoDate) => { setCaptureStart(isoDate); setScreen("capture"); }} />
             ) : (
                 <div style={{ flex: 1, minHeight: 0, overflowY: "auto", margin: "-10px -18px -16px", padding: "10px 18px 16px" }}>
                   <div style={{ maxWidth: wide ? 980 : "none", margin: "0 auto", width: "100%" }}>
                   {screen === "home" && <HomeScreen items={items} masters={masters} onOpen={setSelectedId} onGoto={setScreen} wide={wide} />}
-                  {screen === "list" && <ListScreen items={items} masters={masters} onToggle={toggle} onOpen={setSelectedId} selectedId={selectedId} wide={wide} />}
+                  {screen === "list" && <ListScreen key={`list-${prefsReady}`} items={items} masters={masters} onToggle={toggle} onOpen={setSelectedId} selectedId={selectedId} wide={wide} displayPrefs={displayPrefs} />}
                   {screen === "capture" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><CaptureScreen masters={masters} onAddItem={addItem} initialStart={captureStart} onConsumeInitial={() => setCaptureStart("")} initialDraft={captureDraft} onConsumeInitialDraft={() => setCaptureDraft(null)} /></div>}
-                  {screen === "settings" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><SettingsScreen onGotoMaster={() => setScreen("master")} onGotoExtCal={() => setScreen("extcal")} onGotoNotify={() => setScreen("notify")} extCalendars={extCalendars} notifySettings={notifySettings} onSignOut={onSignOut} userEmail={userEmail} /></div>}
+                  {screen === "settings" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><SettingsScreen onGotoMaster={() => setScreen("master")} onGotoExtCal={() => setScreen("extcal")} onGotoNotify={() => setScreen("notify")} onGotoInitDisp={() => setScreen("initdisp")} extCalendars={extCalendars} notifySettings={notifySettings} onSignOut={onSignOut} userEmail={userEmail} /></div>}
+                  {screen === "initdisp" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><InitialDisplaySettingsScreen displayPrefs={displayPrefs} onSave={saveDisplayPrefs} onBack={() => setScreen("settings")} /></div>}
                   {screen === "master" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><MasterScreen masters={masters} setMasters={setMasters} onBack={() => setScreen("settings")} /></div>}
                   {screen === "extcal" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><ExtCalendarScreen extCalendars={extCalendars} connected={_gcal.connected} email={_gcal.email} loading={_gcal.loading} onConnect={_gcal.connect} onDisconnect={_gcal.disconnect} onSavePref={_gcal.savePref} onBack={() => setScreen("settings")} /></div>}
                   {screen === "notify" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><NotifySettingsScreen settings={notifySettings} setSettings={setNotifySettings} onBack={() => setScreen("settings")} /></div>}
@@ -3225,7 +3464,7 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
           <nav style={{ flexShrink: 0, display: "flex", padding: "8px 8px 20px", borderTop: `1px solid ${C.inkSofter}`,
             background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)" }}>
             {nav.map(n => {
-              const active = screen === n.id || (n.id === "settings" && (screen === "master" || screen === "extcal" || screen === "notify")); const Icon = n.icon; const isCapture = n.id === "capture";
+              const active = screen === n.id || (n.id === "settings" && (screen === "master" || screen === "extcal" || screen === "notify" || screen === "initdisp")); const Icon = n.icon; const isCapture = n.id === "capture";
               return (
                 <button key={n.id} onClick={() => setScreen(n.id)} style={{
                   flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4,

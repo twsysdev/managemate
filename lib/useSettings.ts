@@ -1,15 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Masters, NotifySettings } from "@/lib/types";
+import type { Masters, NotifySettings, DisplayPrefs } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 import {
   EMPTY_MASTERS,
   DEFAULT_NOTIFY,
+  DEFAULT_DISPLAY_PREFS,
   fetchMasters,
   saveMasters,
   fetchNotifySettings,
   saveNotifySettings,
+  fetchDisplayPrefs,
+  saveDisplayPrefs,
 } from "@/lib/settings";
 
 type Updater<T> = T | ((prev: T) => T);
@@ -19,6 +22,8 @@ type Updater<T> = T | ((prev: T) => T);
 export function useSettings() {
   const [masters, setMastersState] = useState<Masters>(EMPTY_MASTERS);
   const [notifySettings, setNotifyState] = useState<NotifySettings>(DEFAULT_NOTIFY);
+  const [displayPrefs, setDisplayState] = useState<DisplayPrefs>(DEFAULT_DISPLAY_PREFS);
+  const [prefsReady, setPrefsReady] = useState(false); // 初期表示設定のロード完了フラグ
   const [loading, setLoading] = useState(true);
 
   const userIdRef = useRef<string | null>(null);
@@ -34,7 +39,11 @@ export function useSettings() {
         const { data: userData } = await supabase.auth.getUser();
         userIdRef.current = userData.user?.id ?? null;
 
-        const [m, n] = await Promise.all([fetchMasters(), fetchNotifySettings()]);
+        const [m, n, d] = await Promise.all([
+          fetchMasters(),
+          fetchNotifySettings(),
+          fetchDisplayPrefs(),
+        ]);
         if (!alive) return;
         if (m) setMastersState(m); // 無ければ EMPTY_MASTERS のまま（新規は空）
         if (n) {
@@ -43,10 +52,14 @@ export function useSettings() {
           // 既定の通知設定を1行作成
           saveNotifySettings(userIdRef.current, DEFAULT_NOTIFY).catch(console.error);
         }
+        if (d) setDisplayState(d); // 無ければ DEFAULT_DISPLAY_PREFS のまま
       } catch (e) {
         console.error("settings load failed", e);
       } finally {
-        if (alive) setLoading(false);
+        if (alive) {
+          setPrefsReady(true);
+          setLoading(false);
+        }
       }
     })();
     return () => {
@@ -76,5 +89,20 @@ export function useSettings() {
     });
   }, []);
 
-  return { masters, setMasters, notifySettings, setNotifySettings, loading };
+  // 初期表示設定は「保存」ボタンで明示的に永続化する（デバウンスなし・即時書き込み）。
+  const saveDisplay = useCallback(async (next: DisplayPrefs) => {
+    setDisplayState(next);
+    if (userIdRef.current) await saveDisplayPrefs(userIdRef.current, next);
+  }, []);
+
+  return {
+    masters,
+    setMasters,
+    notifySettings,
+    setNotifySettings,
+    displayPrefs,
+    saveDisplayPrefs: saveDisplay,
+    prefsReady,
+    loading,
+  };
 }

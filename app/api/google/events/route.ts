@@ -22,6 +22,7 @@ export async function GET() {
     const timeMax = new Date(now.getTime() + 120 * 86400000).toISOString();
     const calendars = await loadGoogleCalendars(tokens.access_token, timeMin, timeMax);
 
+    // 保存済みの表示設定（デフォルト表示・表示色）を上書き適用
     const { data: prefs } = await supabase
       .from("google_calendar_prefs")
       .select("calendar_id, visible, color");
@@ -29,7 +30,11 @@ export async function GET() {
     const merged = calendars.map((c) => {
       const p = prefMap.get(c.id);
       if (!p) return c;
-      return { ...c, enabled: p.visible == null ? c.enabled : p.visible, color: p.color || c.color };
+      return {
+        ...c,
+        enabled: p.visible == null ? c.enabled : p.visible,
+        color: p.color || c.color,
+      };
     });
 
     return NextResponse.json({ connected: true, email: acct.email, calendars: merged });

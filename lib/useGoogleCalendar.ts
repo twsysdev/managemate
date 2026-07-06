@@ -57,18 +57,30 @@ export function useGoogleCalendar() {
     await reload();
   }, [reload]);
 
+  // カレンダーごとの表示設定（visible / color）を保存。
+  // 予定の再取得は重いので、ローカル状態を即時反映しつつ裏で永続化する。
   const savePref = useCallback(
     async (calendarId: string, patch: { visible?: boolean; color?: string }) => {
       setCalendars((prev) =>
         prev.map((c) =>
           c.id === calendarId
-            ? { ...c, ...(patch.visible !== undefined ? { enabled: patch.visible } : {}), ...(patch.color !== undefined ? { color: patch.color } : {}) }
+            ? {
+                ...c,
+                ...(patch.visible !== undefined ? { enabled: patch.visible } : {}),
+                ...(patch.color !== undefined ? { color: patch.color } : {}),
+              }
             : c
         )
       );
       try {
-        await fetch("/api/google/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ calendarId, ...patch }) });
-      } catch {}
+        await fetch("/api/google/prefs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ calendarId, ...patch }),
+        });
+      } catch {
+        // 失敗時は次回reloadでサーバー値に整合
+      }
     },
     []
   );
