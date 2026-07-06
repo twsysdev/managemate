@@ -18,6 +18,7 @@
 
 import React, { useState, useRef } from "react";
 import { useItems } from "@/lib/useItems";
+import { useSettings } from "@/lib/useSettings";
 import {
   Check, Clock, Plus, Send, ListChecks, StickyNote, Calendar as Cal,
   ChevronLeft, ChevronRight, Search, Pin, Tag,
@@ -56,7 +57,7 @@ const KIND_LABEL = { task: "タスク", memo: "メモ", event: "スケジュー�
 //   mode="kind"（①区分）: 区分ごとの固定色
 function itemColor(it, masters, mode) {
   if (mode === "kind") return KIND_COLOR[it.kind] || C.dim;
-  for (const ax of ["A", "C", "B"]) {
+  for (const ax of ["A", "B", "C"]) {
     const info = lookup(masters, ax, it[ax]);
     if (info) return info.color;
   }
@@ -197,6 +198,12 @@ function lookup(masters, axis, id) {
   return masters[axis].items.find(x => x.id === id) || null;
 }
 
+// 軸の表示名（未設定なら「分類A/B/C」を仮表示）
+function axisName(masters, ax) {
+  const n = masters[ax] && masters[ax].name;
+  return (n && n.trim()) ? n : `分類${ax}`;
+}
+
 // 通知タイミング（分前）の選択肢とラベル
 const NOTIFY_OPTIONS = [
   { v: -1, label: "なし" },
@@ -314,9 +321,9 @@ function ItemRow({ it, masters, onToggle, onOpen, selected, colorMode = "class" 
   const c = lookup(masters, "C", it.C);
   const kindMode = colorMode === "kind";
   // 背景色・タイトル装飾は「bg/accent が立っているラベル」を優先採用（A→C→Bの順で探す）。区分モードでは装飾を使わず区分色に統一
-  const bgSource = kindMode ? null : [a, c, b].find(x => x && x.deco.bg);
-  const accentSource = kindMode ? null : [a, c, b].find(x => x && x.deco.accent);
-  const boldTitle = kindMode ? false : [a, c, b].some(x => x && x.deco.bold);
+  const bgSource = kindMode ? null : [a, b, c].find(x => x && x.deco.bg);
+  const accentSource = kindMode ? null : [a, b, c].find(x => x && x.deco.accent);
+  const boldTitle = kindMode ? false : [a, b, c].some(x => x && x.deco.bold);
   const kindColor = KIND_COLOR[it.kind] || C.dim;
 
   const KindIcon = it.kind === "task" ? ListChecks : it.kind === "memo" ? StickyNote : Cal;
@@ -822,7 +829,7 @@ function FilterSheet({ masters, fA, setFA, fB, setFB, fC, setFC, sort, setSort, 
     color: on ? C.goldSoft : C.dim, fontWeight: on ? 600 : 400 });
   const axisRow = (ax, val, setter) => (
     <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 12, color: C.dim, marginBottom: 7 }}>{masters[ax].name}</div>
+      <div style={{ fontSize: 12, color: C.dim, marginBottom: 7 }}>{axisName(masters, ax)}</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         <button onClick={() => setter("")} style={pill(val === "")}>指定なし</button>
         {masters[ax].items.map(o => {
@@ -891,7 +898,7 @@ function FilterSheet({ masters, fA, setFA, fB, setFB, fC, setFC, sort, setSort, 
               <div style={{ fontSize: 12, color: C.dim, marginBottom: 7 }}>並び替え</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {[["default", "デフォルト"], ["startAsc", "開始日順"], ["dueAsc", "期日順"], ["created", "データ登録順"],
-                  ["classA", `${masters.A.name}順`], ["classB", `${masters.B.name}順`], ["classC", `${masters.C.name}順`]].map(([k, l]) => (
+                  ["classA", `${axisName(masters, "A")}順`], ["classB", `${axisName(masters, "B")}順`], ["classC", `${axisName(masters, "C")}順`]].map(([k, l]) => (
                   <button key={k} onClick={() => setSort(k)} style={pill(sort === k)}>{l}</button>
                 ))}
               </div>
@@ -1551,9 +1558,9 @@ function SearchResult({ action, items, masters, onOpenItem }) {
 function CaptureScreen({ masters, onAddItem, initialStart, onConsumeInitial }) {
   const [recKind, setRecKind] = useState("task"); // task | memo | event（登録する区分）
   const [title, setTitle] = useState("");
-  const [A, setA] = useState(masters.A.items[0].id);
-  const [B, setB] = useState(masters.B.items[0].id);
-  const [Cc, setCc] = useState(masters.C.items[0].id);
+  const [A, setA] = useState("");   // 分類は既定「指定なし」（任意）
+  const [B, setB] = useState("");
+  const [Cc, setCc] = useState("");
   const [d1, setD1] = useState("");
   const [d2, setD2] = useState("");
   const [start, setStart] = useState(initialStart || "");
@@ -1613,9 +1620,14 @@ function CaptureScreen({ masters, onAddItem, initialStart, onConsumeInitial }) {
           style={inputStyle} />
 
         <div style={{ display: "flex", gap: 8 }}>
-          <Select value={A} onChange={setA} options={masters.A.items} small colorize />
-          <Select value={B} onChange={setB} options={masters.B.items} small colorize />
-          <Select value={Cc} onChange={setCc} options={masters.C.items} small colorize />
+          {["A", "B", "C"].map(ax => (
+            <span key={ax} style={{ flex: 1, minWidth: 0, fontSize: 11, color: C.dim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{axisName(masters, ax)}</span>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Select value={A} onChange={setA} options={masters.A.items} small colorize allowEmpty />
+          <Select value={B} onChange={setB} options={masters.B.items} small colorize allowEmpty />
+          <Select value={Cc} onChange={setCc} options={masters.C.items} small colorize allowEmpty />
         </div>
 
         {/* 日時（終日チェック内包・15分刻み） */}
@@ -2021,7 +2033,7 @@ function AIReview({ draft, setDraft, masters, onBack, onConfirm }) {
 
         <div style={{ display: "flex", gap: 8 }}>
           {["A", "B", "C"].map(ax => (
-            <Select key={ax} value={draft[ax]} onChange={v => set({ [ax]: v })} options={masters[ax].items} small colorize />
+            <Select key={ax} value={draft[ax]} onChange={v => set({ [ax]: v })} options={masters[ax].items} small colorize allowEmpty />
           ))}
         </div>
 
@@ -2082,6 +2094,9 @@ function MasterScreen({ masters, setMasters, onBack }) {
   function remove(id) {
     setMasters(prev => ({ ...prev, [axis]: { ...prev[axis], items: prev[axis].items.filter(it => it.id !== id) } }));
   }
+  function setName(name) {
+    setMasters(prev => ({ ...prev, [axis]: { ...prev[axis], name } }));
+  }
 
   const [pickerFor, setPickerFor] = useState(null); // 色選択を開いているラベルid
 
@@ -2096,8 +2111,18 @@ function MasterScreen({ masters, setMasters, onBack }) {
       </div>
       <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
         {["A", "B", "C"].map(k => (
-          <button key={k} onClick={() => setAxis(k)} style={chip(axis === k)}>{masters[k].name}</button>
+          <button key={k} onClick={() => setAxis(k)} style={chip(axis === k)}>{axisName(masters, k)}</button>
         ))}
+      </div>
+
+      <div style={{ background: C.inkSoft, border: `1px solid ${C.accent2}55`, borderRadius: 14, padding: "13px 14px", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
+          <span style={{ width: 3, height: 13, borderRadius: 2, background: C.accent2 }} />
+          <span style={{ fontSize: 11.5, color: C.dim }}>分類の名前</span>
+        </div>
+        <input value={m.name} onChange={e => setName(e.target.value)} placeholder={`分類${axis}`}
+          style={{ ...inputStyle, fontWeight: 600 }} />
+        <div style={{ fontSize: 10.5, color: C.dimmer, marginTop: 7 }}>この名前がタブ・入力・フィルタに表示されます（例: 優先度 / カテゴリ）</div>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2810,7 +2835,7 @@ function Field({ label, children, flex }) {
     </div>
   );
 }
-function Select({ value, onChange, options, small, colorize }) {
+function Select({ value, onChange, options, small, colorize, allowEmpty }) {
   const cur = options.find(o => o.id === value);
   const col = colorize && cur && cur.color ? cur.color : null;
   return (
@@ -2824,6 +2849,7 @@ function Select({ value, onChange, options, small, colorize }) {
       fontWeight: col ? 600 : 400,
       ...(small ? { flex: 1, minWidth: 0 } : {}),
     }}>
+      {allowEmpty && <option value="" style={{ background: C.inkSoft, color: C.dim, fontWeight: 400 }}>指定なし</option>}
       {options.map(o => <option key={o.id} value={o.id} style={{ background: C.inkSoft, color: C.paper, fontWeight: 400 }}>{o.label}</option>)}
     </select>
   );
@@ -2904,7 +2930,7 @@ function DetailPanel({ item, masters, onClose, onSave, onDelete, onToggle, wide 
 
             <div style={{ display: "flex", gap: 8 }}>
               {["A", "B", "C"].map(ax => (
-                <Select key={ax} value={draft[ax]} onChange={v => set({ [ax]: v })} options={masters[ax].items} small colorize />
+                <Select key={ax} value={draft[ax]} onChange={v => set({ [ax]: v })} options={masters[ax].items} small colorize allowEmpty />
               ))}
             </div>
 
@@ -2972,21 +2998,17 @@ function DetailPanel({ item, masters, onClose, onSave, onDelete, onToggle, wide 
 
 // ── ルート ──
 export default function ManageMateApp({ onSignOut, userEmail }) {
-  const [masters, setMasters] = useState(initialMasters);
   // items は Supabase と同期（フェーズ2: state → DB 永続化）
   const _itemsApi = useItems();
   const items = _itemsApi.items;
-  const [extCalendars, setExtCalendars] = useState(initialExtCalendars); // 連携カレンダー
-  // 通知の全体設定（本番はプッシュ基盤で送信。プレビューは設定と通知センターのUIまで）
-  const [notifySettings, setNotifySettings] = useState({
-    enabled: true,          // 通知全体のON/OFF
-    defaultLead: 10,        // 予定の既定リマインド（分前）
-    taskLead: 1440,         // タスク期日の既定リマインド（分前。1440=1日前）
-    overdue: true,          // 期限超過アラート
-    quietStart: "22:00",    // 静音時間帯 開始
-    quietEnd: "07:00",      // 静音時間帯 終了
-    quietEnabled: true,     // 静音時間帯を有効にするか
-  });
+  // 分類マスタ・通知設定も Supabase と同期（ユーザーごと。新規ユーザーは分類ゼロから）
+  const _settings = useSettings();
+  const masters = _settings.masters;
+  const setMasters = _settings.setMasters;
+  const notifySettings = _settings.notifySettings;
+  const setNotifySettings = _settings.setNotifySettings;
+  // 連携カレンダー：実連携はフェーズ3。ダミーは撤去し空から開始
+  const [extCalendars, setExtCalendars] = useState([]);
   const [screen, setScreen] = useState("home");
   const [selectedId, setSelectedId] = useState(null);
   const [notifyOpen, setNotifyOpen] = useState(false); // 通知センターの開閉
