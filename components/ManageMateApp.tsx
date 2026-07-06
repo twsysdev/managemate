@@ -49,8 +49,8 @@ const C = {
   accent2: "#C9A24B", navyDeep: "#16233E",
 };
 
-// 区分による色分け（①）。タスク=ネイビー(能動)/メモ=スレートグレー(記録)/スケジュール=ゴールド(予定)
-const KIND_COLOR = { task: "#2E5AA8", memo: "#6B7688", event: "#C9A24B" };
+// 区分による色分け（①）。ソフトパステル(セージ)：タスク=ソフトブルー/メモ=セージグリーン/スケジュール=ソフトゴールド
+const KIND_COLOR = { task: "#7C9CD1", memo: "#9FBF9C", event: "#E3C878" };
 const KIND_LABEL = { task: "タスク", memo: "メモ", event: "スケジュール" };
 
 // 色ルールに応じて item の表示色を返す
@@ -595,7 +595,7 @@ function ListScreen({ items, masters, onToggle, onOpen, selectedId, wide }) {
   const [fC, setFC] = useState("");
   const [sort, setSort] = useState("default"); // default | startAsc | dueAsc | created | classA | classB | classC
   const [sortDir, setSortDir] = useState("asc"); // asc | desc（デフォルト以外で有効）
-  const [colorMode, setColorMode] = useState("class"); // class（②分類、既定）| kind（①区分）
+  const [colorMode, setColorMode] = useState("kind"); // kind（①区分、既定）| class（②分類）
 
   const TODAY = ymd(new Date());
 
@@ -817,7 +817,7 @@ function ListScreen({ items, masters, onToggle, onOpen, selectedId, wide }) {
       {showSheet && (
         <FilterSheet {...{ masters, fA, setFA, fB, setFB, fC, setFC, sort, setSort, sortDir, setSortDir, colorMode, setColorMode,
           onClose: () => setShowSheet(false),
-          onReset: () => { setFA(""); setFB(""); setFC(""); setSort("default"); setSortDir("asc"); setColorMode("class"); } }} />
+          onReset: () => { setFA(""); setFB(""); setFC(""); setSort("default"); setSortDir("asc"); setColorMode("kind"); } }} />
       )}
     </div>
   );
@@ -919,8 +919,8 @@ function FilterSheet({ masters, fA, setFA, fB, setFB, fC, setFC, sort, setSort, 
               <div style={{ height: 1, background: C.inkSofter, margin: "14px 0" }} />
               <div style={{ fontSize: 12, color: C.dim, marginBottom: 7 }}>色分けのルール</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                <button onClick={() => setColorMode("class")} style={pill(colorMode === "class")}>分類A/B/Cの色</button>
                 <button onClick={() => setColorMode("kind")} style={pill(colorMode === "kind")}>区分の色</button>
+                <button onClick={() => setColorMode("class")} style={pill(colorMode === "class")}>分類A/B/Cの色</button>
               </div>
               {colorMode === "kind" && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 11.5, color: C.dim }}>
@@ -2277,11 +2277,11 @@ function CalendarScreen({ items, masters, onOpenItem, onNewOnDate, extCalendars 
   const [showSheet, setShowSheet] = useState(false);
   const [fA, setFA] = useState(""); const [fB, setFB] = useState(""); const [fC, setFC] = useState("");
   const [hideDone, setHideDone] = useState(false); // 完了を隠す
-  const [colorMode, setColorMode] = useState("class"); // class（②分類、既定）| kind（①区分）
+  const [colorMode, setColorMode] = useState("kind"); // kind（①区分、既定）| class（②分類）
   // 連携カレンダーごとの表示ON/OFF（既定は各カレンダーのenabledに従う）
   const [calVisible, setCalVisible] = useState(() => Object.fromEntries(extCalendars.map(c => [c.id, c.enabled])));
 
-  const activeFilters = (fA ? 1 : 0) + (fB ? 1 : 0) + (fC ? 1 : 0) + (hideDone ? 1 : 0) + (colorMode !== "class" ? 1 : 0);
+  const activeFilters = (fA ? 1 : 0) + (fB ? 1 : 0) + (fC ? 1 : 0) + (hideDone ? 1 : 0) + (colorMode !== "kind" ? 1 : 0);
 
   // 自アプリの予定（絞り込み後）
   const filteredOwn = items.filter(i => {
@@ -2417,7 +2417,7 @@ function CalendarScreen({ items, masters, onOpenItem, onNewOnDate, extCalendars 
 
       {showSheet && (
         <FilterSheet {...{ masters, fA, setFA, fB, setFB, fC, setFC, sort: "", setSort: () => {}, colorMode, setColorMode,
-          onClose: () => setShowSheet(false), onReset: () => { setFA(""); setFB(""); setFC(""); setHideDone(false); setColorMode("class"); },
+          onClose: () => setShowSheet(false), onReset: () => { setFA(""); setFB(""); setFC(""); setHideDone(false); setColorMode("kind"); },
           extra: { hideDone, setHideDone, extCalendars, calVisible, setCalVisible } }} />
       )}
 
@@ -3209,4 +3209,4 @@ const pill = (on) => ({ padding: "6px 12px", borderRadius: 999, fontSize: 12, cu
 const bigToggle = (active) => ({ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
   padding: "11px 0", borderRadius: 12, fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap",
   border: `1px solid ${active ? C.gold + "55" : C.inkSofter}`,
-  background: active ? C.gold + "14" : "transparent", color: active ? C.goldSoft : C.dim });
+  background: active ? C.gold + "14" : "transparent", color: active ? C.
