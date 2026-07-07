@@ -153,18 +153,21 @@ export async function fetchEvents(
   return { items: j.items || [], timeZone: j.timeZone || "" };
 }
 
-// カレンダーの timeZone が取れないときのフォールバック（本アプリは日本時間基準）
-const DEFAULT_TZ = "Asia/Tokyo";
+// アプリの表示タイムゾーン（日本時間で固定）。
+// 連携カレンダー個別の timeZone 設定（UTC 等になっている場合がある）には依存せず、
+// 常にこのゾーンへ変換することで、Google カレンダー（ユーザーのアカウント時間帯＝JST）の
+// 表示と一致させる。将来的に他ゾーン対応が必要ならここを可変にする。
+const APP_TZ = "Asia/Tokyo";
 
 // RFC3339（"...Z"＝UTC / "...+09:00"＝オフセット付き 等）を、
-// 指定タイムゾーンの「壁時計」YYYY-MM-DDTHH:MM に変換する。
+// アプリの表示タイムゾーン（APP_TZ）の「壁時計」YYYY-MM-DDTHH:MM に変換する。
 // ・文字列の先頭16文字を切るだけだと、GoogleがUTC(Z)で返す予定で時刻がずれるため、
-//   一度 Date（絶対時刻）にしてから対象TZの現地時刻へ変換する。
-function toWallClock(iso: string, tz: string): string {
+//   一度 Date（絶対時刻）にしてから APP_TZ の現地時刻へ変換する。
+function toWallClock(iso: string): string {
   const dt = new Date(iso);
   if (isNaN(dt.getTime())) return iso.slice(0, 16); // 念のためのフォールバック
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz || DEFAULT_TZ,
+    timeZone: APP_TZ,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -179,10 +182,10 @@ function toWallClock(iso: string, tz: string): string {
 }
 
 // Google の日時 → アプリ形式（時刻あり "YYYY-MM-DDTHH:MM" / 終日 "YYYY-MM-DD"）
-// 時刻ありは絶対時刻としてパースし、カレンダーのタイムゾーンの壁時計に変換（UTC/オフセット両対応）。
-function fmtGoogleDate(d: { dateTime?: string; date?: string } | undefined, tz: string): string {
+// 時刻ありは絶対時刻としてパースし、常に日本時間（APP_TZ）の壁時計に変換（UTC/オフセット両対応）。
+function fmtGoogleDate(d: { dateTime?: string; date?: string } | undefined): string {
   if (!d) return "";
-  if (d.dateTime) return toWallClock(d.dateTime, tz);
+  if (d.dateTime) return toWallClock(d.dateTime);
   return d.date || ""; // 終日は日付のみ（タイムゾーン変換しない）
 }
 
@@ -204,7 +207,8 @@ export async function loadGoogleCalendars(
   const list = (await fetchCalendarList(accessToken)).slice(0, 12);
   const results = await Promise.all(
     list.map(async (c) => {
-      const { items, timeZone } = await fetchEvents(accessToken, c.id, timeMin, timeMax);
+      // timeZone は使わない（アプリ側で常に日本時間へ変換する）。
+      const { items } = await fetchEvents(accessToken, c.id, timeMin, timeMax);
       return {
         id: c.id,
         name: c.summary || (c.primary ? "メイン" : "カレンダー"),
@@ -214,8 +218,8 @@ export async function loadGoogleCalendars(
         events: items.map((ev) => ({
           id: ev.id,
           title: ev.summary || "(タイトルなし)",
-          start: fmtGoogleDate(ev.start, timeZone),
-          end: fmtGoogleDate(ev.end, timeZone),
+          start: fmtGoogleDate(ev.start),
+          end: fmtGoogleDate(ev.end),
           meet: ev.hangoutLink || "",
         })),
       };

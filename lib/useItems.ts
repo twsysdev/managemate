@@ -35,16 +35,12 @@ export function useItems() {
 
   const toggle = useCallback(
     async (id: Item["id"]) => {
-      let next = false;
-      setItems((prev) =>
-        prev.map((i) => {
-          if (i.id === id) {
-            next = !i.done;
-            return { ...i, done: next };
-          }
-          return i;
-        })
-      );
+      // 現在の状態から次の done を確定してから、楽観更新＋DB保存を行う。
+      // （setItems の updater 内で next を代入して直後に参照すると、
+      //   updater 実行タイミングの都合で古い値が保存される不具合になるため）
+      const cur = items.find((i) => i.id === id);
+      const next = cur ? !cur.done : true;
+      setItems((prev) => prev.map((i) => (i.id === id ? { ...i, done: next } : i)));
       try {
         await updateItemDb(id, { done: next });
       } catch (e) {
@@ -52,7 +48,7 @@ export function useItems() {
         reload();
       }
     },
-    [reload]
+    [items, reload]
   );
 
   // Capture 画面からの1件追加。DBのidが必要なので確定まで待ってから反映。
