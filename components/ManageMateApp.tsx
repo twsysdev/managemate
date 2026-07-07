@@ -20,12 +20,13 @@ import React, { useState, useRef } from "react";
 import { useItems } from "@/lib/useItems";
 import { useSettings } from "@/lib/useSettings";
 import { useGoogleCalendar } from "@/lib/useGoogleCalendar";
+import { useZoom } from "@/lib/useZoom";
 import {
   Check, Clock, Plus, Send, ListChecks, StickyNote, Calendar as Cal,
   ChevronLeft, ChevronRight, Search, Pin, Tag,
   Database, Paperclip, X, Pencil, Trash2, Bold, Palette, FileText, Upload, Copy,
   Sparkles, Loader, Wand2, ArrowLeft, MessageCircle, CornerDownLeft, Settings, LogOut,
-  Home, Star, Bell, Sun, TrendingUp, ChevronRight as ChevR, Sliders, Eye, EyeOff, ChevronUp, ChevronDown, ExternalLink
+  Home, Star, Bell, Sun, TrendingUp, ChevronRight as ChevR, Sliders, Eye, EyeOff, ChevronUp, ChevronDown, ExternalLink, Video
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────
@@ -361,6 +362,7 @@ function ItemRow({ it, masters, onToggle, onOpen, selected, colorMode = "class" 
           <LabelChip info={a} small />
           <LabelChip info={b} small />
           <LabelChip info={c} small />
+          {it.zoomJoinUrl && <ZoomBadge small />}
         </div>
 
         {it.detail1 && (
@@ -1780,8 +1782,10 @@ function SearchResult({ action, items, masters, onOpenItem }) {
 
 // ── 画面：入力（おまかせ / 登録フォーム / マスタ 切替）──
 // データは単一DB(items)。区分(recKind: task|memo|event)はフォーム内トグルで選ぶ。
-function CaptureScreen({ masters, onAddItem, initialStart, onConsumeInitial, initialDraft, onConsumeInitialDraft }) {
+function CaptureScreen({ masters, onAddItem, zoom, initialStart, onConsumeInitial, initialDraft, onConsumeInitialDraft }) {
   const [recKind, setRecKind] = useState("task"); // task | memo | event（登録する区分）
+  const [makeZoom, setMakeZoom] = useState(false); // 予定登録時にZoom会議を作成するか
+  const [zoomBusy, setZoomBusy] = useState(false);
   const [title, setTitle] = useState("");
   const [A, setA] = useState("");   // 分類は既定「指定なし」（任意）
   const [B, setB] = useState("");
@@ -1831,12 +1835,27 @@ function CaptureScreen({ masters, onAddItem, initialStart, onConsumeInitial, ini
     const next = prompt("ファイル名を編集", files[i]);
     if (next != null && next.trim()) setFiles(files.map((f, idx) => idx === i ? next.trim() : f));
   }
-  function submit() {
+  async function submit() {
     if (!title.trim()) { setFlash({ ok: false, msg: "タイトルを入力してください" }); setTimeout(() => setFlash(null), 2000); return; }
     if (start && end && end < start) { setFlash({ ok: false, msg: "終了は開始より後にしてください" }); setTimeout(() => setFlash(null), 2400); return; }
-    onAddItem({ kind: recKind, title: title.trim(), A, B, C: Cc, detail1: d1, detail2: d2, start, end, files, notify });
-    setFlash({ ok: true, msg: `${recKind === "task" ? "タスク" : recKind === "memo" ? "メモ" : "スケジュール"}として登録しました` });
-    setTitle(""); setD1(""); setD2(""); setStart(""); setEnd(""); setFiles([]); setNotify(null);
+    let zoomFields = {};
+    // 予定＋トグルONなら、登録前にZoom会議を作成して紐づける
+    if (recKind === "event" && makeZoom && zoom && zoom.connected) {
+      setZoomBusy(true);
+      try {
+        const m = await zoom.createMeeting({ topic: title.trim(), start, end });
+        zoomFields = { zoomMeetingId: m.id, zoomJoinUrl: m.join_url, zoomPasscode: m.passcode };
+      } catch (e) {
+        setZoomBusy(false);
+        setFlash({ ok: false, msg: (e && e.message) || "Zoom会議の作成に失敗しました" });
+        setTimeout(() => setFlash(null), 3000);
+        return;
+      }
+      setZoomBusy(false);
+    }
+    onAddItem({ kind: recKind, title: title.trim(), A, B, C: Cc, detail1: d1, detail2: d2, start, end, files, notify, ...zoomFields });
+    setFlash({ ok: true, msg: `${recKind === "task" ? "タスク" : recKind === "memo" ? "メモ" : "スケジュール"}として登録しました${zoomFields.zoomJoinUrl ? "（Zoom会議つき）" : ""}` });
+    setTitle(""); setD1(""); setD2(""); setStart(""); setEnd(""); setFiles([]); setNotify(null); setMakeZoom(false);
     setTimeout(() => setFlash(null), 2400);
   }
 
@@ -1875,6 +1894,21 @@ function CaptureScreen({ masters, onAddItem, initialStart, onConsumeInitial, ini
 
         {/* 日時（終日チェック内包・15分刻み） */}
         <DateTimeField start={start} end={end} onChange={(s, e) => { setStart(s); setEnd(e); }} />
+
+        {/* Zoom会議を作成（予定＋連携時のみ） */}
+        {recKind === "event" && zoom && zoom.connected && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+            border: `1px solid ${makeZoom ? "#2D8CFF55" : C.inkSofter}`, borderRadius: 10, padding: "10px 12px",
+            background: makeZoom ? "#2D8CFF0D" : "transparent" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+              <Video size={15} color="#2D8CFF" />
+              <span style={{ fontSize: 12.5, color: C.paper, fontWeight: 600 }}>Zoom会議を作成</span>
+            </div>
+            <button onClick={() => setMakeZoom(v => !v)} style={{ width: 44, height: 25, borderRadius: 999, border: "none", cursor: "pointer", flexShrink: 0, position: "relative", background: makeZoom ? "#2D8CFF" : C.inkSofter }}>
+              <span style={{ position: "absolute", top: 2, left: makeZoom ? 21 : 2, width: 21, height: 21, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 3px rgba(0,0,0,.2)" }} />
+            </button>
+          </div>
+        )}
 
         {/* 通知（タスク・予定のみ。メモは対象外） */}
         {recKind !== "memo" && (
@@ -1917,8 +1951,8 @@ function CaptureScreen({ masters, onAddItem, initialStart, onConsumeInitial, ini
           <input ref={fileInput} type="file" multiple onChange={pickFiles} style={{ display: "none" }} />
         </div>
 
-        <button onClick={submit} style={{ ...primaryBtn, marginTop: 4, justifyContent: "center" }}>
-          {recKind === "task" ? "タスクとして登録" : recKind === "memo" ? "メモとして登録" : "スケジュールとして登録"} <Send size={15} />
+        <button onClick={submit} disabled={zoomBusy} style={{ ...primaryBtn, marginTop: 4, justifyContent: "center", opacity: zoomBusy ? 0.6 : 1 }}>
+          {zoomBusy ? "Zoom会議を作成中…" : (recKind === "task" ? "タスクとして登録" : recKind === "memo" ? "メモとして登録" : "スケジュールとして登録")} {zoomBusy ? <Loader size={15} className="spin" /> : <Send size={15} />}
         </button>
       </div>
 
@@ -2147,7 +2181,7 @@ function InitialDisplaySettingsScreen({ displayPrefs, onSave, onBack }) {
 // 連携カレンダーの表示色プリセット（アプリの区分色＋汎用色）。ほかにHEX直接入力も可。
 const CAL_COLOR_PRESETS = ["#C0492E", "#E0602E", "#C9A24B", "#3C7A5A", "#2FA37A", "#2E5AA8", "#6669D8", "#8B4FBE", "#6B7688", "#C64B7E"];
 
-function ExtCalendarScreen({ extCalendars = [], connected, email, loading, onConnect, onDisconnect, onSavePref, onBack }) {
+function ExtCalendarScreen({ extCalendars = [], connected, email, loading, onConnect, onDisconnect, onSavePref, zoom, onBack }) {
   const [pickerFor, setPickerFor] = useState(null); // 色ピッカーを開いているカレンダーid
   const [hexDraft, setHexDraft] = useState("");
   const openPicker = (c) => { setPickerFor(pickerFor === c.id ? null : c.id); setHexDraft(c.color || ""); };
@@ -2158,9 +2192,29 @@ function ExtCalendarScreen({ extCalendars = [], connected, email, loading, onCon
         <button onClick={onBack} style={{ ...iconBtn, width: 32, height: 32 }}><ArrowLeft size={15} color={C.dim} /></button>
         <div>
           <h1 style={{ margin: 0, fontSize: 20, color: C.paper, fontWeight: 700 }}>連携カレンダー</h1>
-          <div style={{ fontSize: 12.5, color: C.dim, marginTop: 2 }}>Googleカレンダーの予定を表示</div>
+          <div style={{ fontSize: 12.5, color: C.dim, marginTop: 2 }}>Googleカレンダーの予定表示・Zoom会議の連携</div>
         </div>
       </div>
+
+      {/* Zoom 連携カード（会議の自動作成用） */}
+      {zoom && (
+        <div style={{ background: C.inkSoft, border: `1px solid ${(zoom.connected ? "#2D8CFF" : C.inkSofter)}${zoom.connected ? "55" : ""}`, borderRadius: 14, padding: "14px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: "#2D8CFF", display: "grid", placeItems: "center", flexShrink: 0 }}>
+            <Video size={18} color="#fff" />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, color: C.paper, fontWeight: 600 }}>{zoom.connected ? "Zoomと連携中" : "Zoom"}</div>
+            <div style={{ fontSize: 12, color: C.dim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {zoom.loading ? "確認中…" : zoom.connected ? (zoom.email || "（アカウント）") : "予定にZoom会議を自動作成・添付"}
+            </div>
+          </div>
+          {zoom.connected ? (
+            <button onClick={zoom.disconnect} style={{ ...ghostBtnFull, padding: "8px 12px", color: C.dawn, borderColor: C.dawn + "55" }}>連携を解除</button>
+          ) : (
+            <button onClick={zoom.connect} disabled={zoom.loading} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#2D8CFF", color: "#fff", border: "none", padding: "9px 14px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", opacity: zoom.loading ? 0.6 : 1 }}>接続する</button>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <div style={{ padding: 30, color: C.dimmer, fontSize: 13, display: "flex", gap: 8, alignItems: "center", justifyContent: "center" }}>
@@ -3462,9 +3516,63 @@ function LinkChips({ text }) {
   );
 }
 
-function DetailPanel({ item, masters, onClose, onSave, onDelete, onDuplicate, onToggle, wide }) {
+// 一覧・カレンダー行に付ける小さな Zoom バッジ
+function ZoomBadge({ small }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#2D8CFF14", color: "#0B5CFF",
+      border: "1px solid #2D8CFF44", borderRadius: 999, padding: small ? "1px 6px" : "2px 8px", fontSize: small ? 10 : 11, fontWeight: 600, verticalAlign: "middle" }}>
+      <Video size={small ? 10 : 11} color="#2D8CFF" /> Zoom
+    </span>
+  );
+}
+
+// 詳細パネル内の Zoom 会議情報ブロック（参加ボタン・会議ID・パスコード・コピー）
+function ZoomMeetingBlock({ item }) {
+  const [copied, setCopied] = useState("");
+  const copy = (key, val) => {
+    try { navigator.clipboard?.writeText(val || ""); setCopied(key); setTimeout(() => setCopied(""), 1200); } catch {}
+  };
+  const CopyBtn = ({ k, val }) => (
+    <button onClick={() => copy(k, val)} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11, color: C.link || "#2E5AA8",
+      border: `1px solid ${C.inkSofter}`, borderRadius: 7, padding: "2px 7px", cursor: "pointer", background: C.soft || "#fff" }}>
+      <Copy size={11} /> {copied === k ? "コピー済" : "コピー"}
+    </button>
+  );
+  return (
+    <div style={{ border: "1px solid #2D8CFF40", background: "linear-gradient(180deg,#2D8CFF0F,#2D8CFF05)", borderRadius: 12, padding: 12, marginTop: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <ZoomBadge />
+        <a href={item.zoomJoinUrl} target="_blank" rel="noopener noreferrer"
+          style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "#2D8CFF", color: "#fff", textDecoration: "none",
+            padding: "7px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 600 }}>
+          参加する <ExternalLink size={13} />
+        </a>
+      </div>
+      {item.zoomMeetingId ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderTop: `1px dashed ${C.inkSofter}`, fontSize: 12.5 }}>
+          <span style={{ color: C.dim }}>会議ID</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 7, color: C.paper, fontWeight: 600, fontFamily: "ui-monospace, Menlo, monospace" }}>{item.zoomMeetingId} <CopyBtn k="id" val={item.zoomMeetingId} /></span>
+        </div>
+      ) : null}
+      {item.zoomPasscode ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderTop: `1px dashed ${C.inkSofter}`, fontSize: 12.5 }}>
+          <span style={{ color: C.dim }}>パスコード</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 7, color: C.paper, fontWeight: 600, fontFamily: "ui-monospace, Menlo, monospace" }}>{item.zoomPasscode} <CopyBtn k="pc" val={item.zoomPasscode} /></span>
+        </div>
+      ) : null}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0 0", borderTop: `1px dashed ${C.inkSofter}`, fontSize: 12.5 }}>
+        <span style={{ color: C.dim }}>リンク</span>
+        <CopyBtn k="url" val={item.zoomJoinUrl} />
+      </div>
+    </div>
+  );
+}
+
+function DetailPanel({ item, masters, onClose, onSave, onDelete, onDuplicate, onToggle, wide, zoom }) {
   // item が変わるたびにローカル編集状態を初期化
   const [draft, setDraft] = useState(item);
+  const [zoomBusy, setZoomBusy] = useState(false);
+  const [zoomErr, setZoomErr] = useState("");
   const fileInput = useRef(null);
   React.useEffect(() => { setDraft(item); }, [item.id]);
 
@@ -3541,6 +3649,32 @@ function DetailPanel({ item, masters, onClose, onSave, onDelete, onDuplicate, on
             </div>
 
             <DateTimeField start={draft.start || ""} end={draft.end || ""} onChange={(s, e) => set({ start: s, end: e })} />
+
+            {/* Zoom会議：予定に会議を紐づけ／表示（連携時のみ） */}
+            {draft.kind === "event" && (
+              draft.zoomJoinUrl ? (
+                <ZoomMeetingBlock item={draft} />
+              ) : zoom && zoom.connected ? (
+                <div style={{ marginTop: 2 }}>
+                  <button disabled={zoomBusy} onClick={async () => {
+                    setZoomErr(""); setZoomBusy(true);
+                    try {
+                      const m = await zoom.createMeeting({ topic: draft.title || "会議", start: draft.start || "", end: draft.end || "" });
+                      set({ zoomMeetingId: m.id, zoomJoinUrl: m.join_url, zoomPasscode: m.passcode });
+                    } catch (e) { setZoomErr((e && e.message) || "Zoom会議の作成に失敗しました。"); }
+                    finally { setZoomBusy(false); }
+                  }} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, width: "100%", padding: "11px 0",
+                    borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: zoomBusy ? "default" : "pointer",
+                    border: "1px solid #2D8CFF55", background: "#2D8CFF12", color: "#0B5CFF", opacity: zoomBusy ? 0.6 : 1 }}>
+                    {zoomBusy ? <Loader size={14} className="spin" /> : <Video size={14} />} {zoomBusy ? "作成中…" : "Zoom会議を作成"}
+                  </button>
+                  <div style={{ fontSize: 11, color: C.dimmer, marginTop: 5 }}>作成後「保存」で予定に会議が紐づきます。</div>
+                  {zoomErr && <div style={{ fontSize: 11.5, color: C.dawn, marginTop: 5 }}>{zoomErr}</div>}
+                </div>
+              ) : (
+                <div style={{ fontSize: 11.5, color: C.dimmer, marginTop: 2 }}>設定 &gt; 連携カレンダー でZoomを接続すると、この予定にZoom会議を作成できます。</div>
+              )
+            )}
 
             {draft.kind !== "memo" && (
               <div>
@@ -3630,6 +3764,8 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
   // 連携カレンダー：Google連携（フェーズ3）から取得
   const _gcal = useGoogleCalendar();
   const extCalendars = _gcal.calendars;
+  // Zoom連携（接続状態＋会議作成）
+  const _zoom = useZoom();
   const [screen, setScreen] = useState("home");
   const [selectedId, setSelectedId] = useState(null);
   const [notifyOpen, setNotifyOpen] = useState(false); // 通知センターの開閉
@@ -3656,7 +3792,7 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
       const sc = params.get("screen");
       if (sc) {
         setScreen(sc);
-        params.delete("screen"); params.delete("gcal");
+        params.delete("screen"); params.delete("gcal"); params.delete("zoom");
         const qs = params.toString();
         window.history.replaceState({}, "", window.location.pathname + (qs ? "?" + qs : ""));
       }
@@ -3769,11 +3905,11 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
                   <div style={{ maxWidth: wide ? 980 : "none", margin: "0 auto", width: "100%" }}>
                   {screen === "home" && <HomeScreen items={items} masters={masters} onOpen={setSelectedId} onGoto={setScreen} wide={wide} />}
                   {screen === "list" && <ListScreen key={`list-${prefsReady}`} items={items} masters={masters} onToggle={toggle} onOpen={setSelectedId} selectedId={selectedId} wide={wide} displayPrefs={displayPrefs} />}
-                  {screen === "capture" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><CaptureScreen masters={masters} onAddItem={addItem} initialStart={captureStart} onConsumeInitial={() => setCaptureStart("")} initialDraft={captureDraft} onConsumeInitialDraft={() => setCaptureDraft(null)} /></div>}
+                  {screen === "capture" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><CaptureScreen masters={masters} onAddItem={addItem} zoom={_zoom} initialStart={captureStart} onConsumeInitial={() => setCaptureStart("")} initialDraft={captureDraft} onConsumeInitialDraft={() => setCaptureDraft(null)} /></div>}
                   {screen === "settings" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><SettingsScreen onGotoMaster={() => setScreen("master")} onGotoExtCal={() => setScreen("extcal")} onGotoNotify={() => setScreen("notify")} onGotoInitDisp={() => setScreen("initdisp")} extCalendars={extCalendars} notifySettings={notifySettings} onSignOut={onSignOut} userEmail={userEmail} /></div>}
                   {screen === "initdisp" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><InitialDisplaySettingsScreen displayPrefs={displayPrefs} onSave={saveDisplayPrefs} onBack={() => setScreen("settings")} /></div>}
                   {screen === "master" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><MasterScreen masters={masters} setMasters={setMasters} onBack={() => setScreen("settings")} /></div>}
-                  {screen === "extcal" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><ExtCalendarScreen extCalendars={extCalendars} connected={_gcal.connected} email={_gcal.email} loading={_gcal.loading} onConnect={_gcal.connect} onDisconnect={_gcal.disconnect} onSavePref={_gcal.savePref} onBack={() => setScreen("settings")} /></div>}
+                  {screen === "extcal" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><ExtCalendarScreen extCalendars={extCalendars} connected={_gcal.connected} email={_gcal.email} loading={_gcal.loading} onConnect={_gcal.connect} onDisconnect={_gcal.disconnect} onSavePref={_gcal.savePref} zoom={_zoom} onBack={() => setScreen("settings")} /></div>}
                   {screen === "notify" && <div style={{ maxWidth: wide ? 640 : "none", margin: "0 auto" }}><NotifySettingsScreen settings={notifySettings} setSettings={setNotifySettings} onBack={() => setScreen("settings")} /></div>}
                   </div>
                 </div>
@@ -3806,14 +3942,14 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
 
         {/* 詳細パネル：広い画面は右に並べ、狭い画面は下シート */}
         {selected && wide && (
-          <DetailPanel item={selected} masters={masters} wide
+          <DetailPanel item={selected} masters={masters} wide zoom={_zoom}
             onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onDuplicate={duplicateItem} onToggle={toggle} />
         )}
       </div>
 
       {/* 狭い画面用の下シート（全幅オーバーレイ） */}
       {selected && !wide && (
-        <DetailPanel item={selected} masters={masters} wide={false}
+        <DetailPanel item={selected} masters={masters} wide={false} zoom={_zoom}
           onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onDuplicate={duplicateItem} onToggle={toggle} />
       )}
 

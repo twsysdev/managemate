@@ -17,6 +17,9 @@ interface DbItem {
   files: string[];
   done: boolean;
   notify: number | null;
+  zoom_meeting_id: string | null;
+  zoom_join_url: string | null;
+  zoom_passcode: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -37,6 +40,9 @@ export function dbToItem(r: DbItem): Item {
     files: r.files ?? [],
     done: !!r.done,
     notify: r.notify ?? null,
+    zoomMeetingId: r.zoom_meeting_id ?? "",
+    zoomJoinUrl: r.zoom_join_url ?? "",
+    zoomPasscode: r.zoom_passcode ?? "",
     _seq: r.created_at ? Date.parse(r.created_at) : 0,
   };
 }
@@ -56,6 +62,9 @@ function toDbColumns(data: Partial<Item>): Record<string, unknown> {
   if (data.files !== undefined) out.files = data.files;
   if (data.done !== undefined) out.done = data.done;
   if (data.notify !== undefined) out.notify = data.notify;
+  if (data.zoomMeetingId !== undefined) out.zoom_meeting_id = data.zoomMeetingId;
+  if (data.zoomJoinUrl !== undefined) out.zoom_join_url = data.zoomJoinUrl;
+  if (data.zoomPasscode !== undefined) out.zoom_passcode = data.zoomPasscode;
   return out;
 }
 
@@ -74,6 +83,10 @@ function withInsertDefaults(d: Partial<Item>): Partial<Item> {
     files: d.files ?? [],
     done: d.done ?? false,
     notify: d.notify ?? null,
+    // Zoom会議情報は指定があれば引き継ぐ（登録時に会議を紐づけるため）
+    ...(d.zoomMeetingId !== undefined ? { zoomMeetingId: d.zoomMeetingId } : {}),
+    ...(d.zoomJoinUrl !== undefined ? { zoomJoinUrl: d.zoomJoinUrl } : {}),
+    ...(d.zoomPasscode !== undefined ? { zoomPasscode: d.zoomPasscode } : {}),
   };
 }
 

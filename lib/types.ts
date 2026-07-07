@@ -67,6 +67,12 @@ export interface Item {
   synced?: boolean;
   /** 個別通知タイミング（分前）。null=全体設定に従う / -1=なし */
   notify?: number | null;
+  /** Zoom 会議ID（連携で自動作成した場合） */
+  zoomMeetingId?: string;
+  /** Zoom 参加URL */
+  zoomJoinUrl?: string;
+  /** Zoom パスコード */
+  zoomPasscode?: string;
   /** 内部用: 並び替え「データ登録順」の基準（created_at のms）。UIには出さない */
   _seq?: number;
 }
