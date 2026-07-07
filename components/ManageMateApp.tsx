@@ -25,7 +25,7 @@ import {
   ChevronLeft, ChevronRight, Search, Pin, Tag,
   Database, Paperclip, X, Pencil, Trash2, Bold, Palette, FileText, Upload, Copy,
   Sparkles, Loader, Wand2, ArrowLeft, MessageCircle, CornerDownLeft, Settings, LogOut,
-  Home, Star, Bell, Sun, TrendingUp, ChevronRight as ChevR, Sliders, Eye, EyeOff, ChevronUp, ChevronDown
+  Home, Star, Bell, Sun, TrendingUp, ChevronRight as ChevR, Sliders, Eye, EyeOff, ChevronUp, ChevronDown, ExternalLink
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────
@@ -414,7 +414,7 @@ async function fetchHomeInsights(openTasks, masters) {
     const due = (t.end || t.start || "").slice(0, 16);
     return `- id:${t.id} | ${t.title}${cls ? " | 分類:" + cls : ""}${due ? " | 期日:" + due : ""}`;
   }).join("\n");
-  const prompt = `あなたはタスク管理秘書です。今日(${today})を踏まえ、未完了タスクから「本日の最優先」を1件選び、短い提案をしてください。JSONだけを返す。前置き・コードフェンス不要。
+  const prompt = `今日(${today})を踏まえ、未完了タスクから「本日の最優先」を1件選び、短い提案をしてください。
 未完了タスク:
 ${list}
 返すJSON: {"priorityId":"<上のidのいずれか>","reason":"選定理由を40字以内で一言","advice":"今日の進め方の提案を60字程度で1〜2文"}`;
@@ -1045,13 +1045,15 @@ function aiErrorReason(detail) {
 // ── AIバックエンド呼び出し（サーバーの /api/ai 経由で Anthropic を呼ぶ）──
 // APIキーはサーバー専用の環境変数（ANTHROPIC_API_KEY）でのみ扱う。フロントには出さない。
 // 失敗時は「なぜ失敗したか」を含む例外を投げる（呼び出し側でユーザーに理由を提示する）。
-async function completeAI(prompt) {
+async function completeAI(prompt, attachments) {
   let res;
   try {
     res = await fetch("/api/ai", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify(
+        attachments && attachments.length ? { prompt, attachments } : { prompt }
+      ),
     });
   } catch (e) {
     throw new Error("AIサーバーに接続できませんでした（ネットワーク未接続、またはサーバーが起動していません）。");
@@ -1081,7 +1083,7 @@ async function analyzeWithAI(text, masters) {
     masters[ax].items.map(it => `{id:"${it.id}", label:"${it.label}"}`).join(", ")
   ).join("\n");
 
-  const prompt = `あなたはタスク管理秘書です。次の入力文を解析し、JSONだけを返してください。前置きやコードフェンスは不要です。
+  const prompt = `次の入力文を解析してください。
 
 入力文:
 """${text}"""
@@ -1200,7 +1202,7 @@ function parseAIJson(raw) {
 // ── チャット：会話＋アクション（登録/検索）をAIに判断させる ──
 // 返答テキストと、必要に応じた action(JSON) を受け取る。
 // AIは completeAI()（サーバーの /api/ai 経由）で呼ぶ。
-async function chatWithAI(history, userText, masters, items, hasFiles) {
+async function chatWithAI(history, userText, masters, items, hasFiles, attachments) {
   const axisDesc = ["A", "B", "C"].map(ax =>
     `分類${ax}（${masters[ax].name}）: ` + masters[ax].items.map(it => `{id:"${it.id}",label:"${it.label}"}`).join(", ")
   ).join("\n");
@@ -1221,9 +1223,9 @@ async function chatWithAI(history, userText, masters, items, hasFiles) {
     ? `\n【添付ファイルについて】ユーザーは資料/スクショを添付しています。本番では中身を実際に読み取ります。ここでは添付名と文脈から内容を推測し、登録(register)や修正(update)を積極的に提案してください。`
     : "";
 
-  const prompt = `あなたは「ManageMate」という名のタスク管理アシスタントです。ユーザーと自然に会話しつつ、必要に応じてタスク/メモ/予定の登録・修正・検索を行います。
+  const prompt = `以下の文脈を踏まえ、ユーザーの新しい発言に応答してください（会話しつつ、必要ならタスク/メモ/予定の登録・修正・検索・レポートを提案）。
 
-【分類マスタ（登録・修正時はこのidから選ぶ。勝手に作らない）】
+【分類マスタ（この中のidから選ぶ）】
 ${axisDesc}
 
 【既存データ（検索・修正の対象）】
@@ -1262,14 +1264,14 @@ ${userText}
   ・開始日と時刻、タイトル、分類
   条件が出そろったら、その繰り返しに該当する日付を自分で列挙し、register の items に「1回ごとに1件ずつ」複数件を入れて返す（例: 毎週月曜10時×8回 → 8件）。生成しすぎない（多くても52件程度まで）。各itemのtitleは同じで良い。日付はstartに個別の日時、必要ならendも設定。
 - 相談・雑談・質問など不要なら action は null。
-- 日時は "YYYY-MM-DDTHH:MM"（終日は "YYYY-MM-DD"）。今日は${new Date().toISOString().slice(0,10)}とする。曜日計算は正確に行う。
+- 今日は${ymd(new Date())}（日本時間）。日時・曜日はこれを基準に正確に計算する。
 - replyは常に必須。何をしたか一言添える。`;
 
   // サーバーの /api/ai 経由でAIを呼ぶ。失敗時は「なぜ失敗したか」を明示したうえで、
   // ローカルの簡易ルール応答（localFallbackChat）も添えて返す。
   let raw;
   try {
-    raw = await completeAI(prompt);
+    raw = await completeAI(prompt, attachments);
   } catch (e) {
     const reason = (e && e.message) ? e.message : "原因不明のエラーが発生しました。";
     const fb = localFallbackChat(userText, masters, items);
@@ -1345,7 +1347,8 @@ function ChatScreen({ masters, items, onAddItems, onUpdateItem, onDeleteItems, o
   // バックエンド経由で画像/PDFをAnthropic APIに添付して中身を解析する。
   function toAttachment(f, name) {
     const isImage = (f.type || "").startsWith("image/");
-    return { name: name || f.name || "ファイル", url: isImage ? URL.createObjectURL(f) : null, isImage };
+    // file 本体を保持し、送信時に縮小＋Base64化して /api/ai に渡す（画像解析用）。
+    return { name: name || f.name || "ファイル", url: isImage ? URL.createObjectURL(f) : null, isImage, file: f };
   }
   function addFiles(fileList) {
     const arr = Array.from(fileList || []);
@@ -1379,6 +1382,33 @@ function ChatScreen({ masters, items, onAddItems, onUpdateItem, onDeleteItems, o
     }
   }
 
+  // 画像Fileを最大辺 maxEdge に縮小し、JPEG の Base64（media_type/data）にして返す。
+  // 送信サイズを抑えるため縮小＋JPEG化する（スクショの解析には十分）。
+  async function toImagePayload(file, maxEdge = 1568) {
+    const dataUrl = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result));
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+    const img = await new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = rej;
+      im.src = dataUrl;
+    });
+    let w = img.naturalWidth || img.width;
+    let h = img.naturalHeight || img.height;
+    const scale = Math.min(1, maxEdge / Math.max(w, h || 1));
+    w = Math.max(1, Math.round(w * scale));
+    h = Math.max(1, Math.round(h * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+    const out = canvas.toDataURL("image/jpeg", 0.85);
+    return { media_type: "image/jpeg", data: out.slice(out.indexOf(",") + 1) };
+  }
+
   async function send() {
     const text = input.trim();
     if ((!text && attachments.length === 0) || busy) return;
@@ -1392,7 +1422,14 @@ function ChatScreen({ masters, items, onAddItems, onUpdateItem, onDeleteItems, o
     setMessages(m => [...m, { role: "user", text, files }]);
     setInput(""); setAttachments([]); setBusy(true);
     try {
-      const { reply, action } = await chatWithAI(history, textForAI, masters, items, files.length > 0);
+      // 第1段階＝画像のみ。1枚5MB以下・最大4枚を、最大辺1568pxに縮小してBase64化しAIへ渡す。
+      const imgFiles = files
+        .filter(a => a && typeof a !== "string" && a.isImage && a.file && a.file.size <= 5 * 1024 * 1024)
+        .slice(0, 4);
+      let imagePayloads = [];
+      try { imagePayloads = await Promise.all(imgFiles.map(a => toImagePayload(a.file))); }
+      catch { imagePayloads = []; }
+      const { reply, action } = await chatWithAI(history, textForAI, masters, items, files.length > 0, imagePayloads);
       setMessages(m => [...m, { role: "ai", text: reply, action }]);
     } catch (e) {
       const reason = (e && e.message) ? e.message : "";
@@ -1521,14 +1558,20 @@ function ChatScreen({ masters, items, onAddItems, onUpdateItem, onDeleteItems, o
           {attachments.map((f, i) => {
             const label = typeof f === "string" ? f : f.name;
             const url = typeof f === "string" ? null : f.url;
+            const isImg = typeof f !== "string" && f.isImage;
             return (
               <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
                 background: C.inkSoft, border: `1px solid ${C.inkSofter}`, borderRadius: 999,
-                padding: url ? "4px 10px 4px 4px" : "5px 10px", color: C.paper, maxWidth: 200 }}>
+                padding: url ? "4px 10px 4px 4px" : "5px 10px", color: C.paper, maxWidth: 240 }}>
                 {url
                   ? <img src={url} alt={label} style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />
                   : <FileText size={12} color={C.dim} />}
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                {/* 画像はAIが中身を解析、それ以外は名前のみ渡す旨を表示 */}
+                <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, borderRadius: 999, padding: "1px 6px",
+                  color: isImg ? C.mist : C.dimmer, background: isImg ? C.mist + "1F" : C.inkSofter }}>
+                  {isImg ? "画像を解析" : "名前のみ"}
+                </span>
                 <X size={12} color={C.dim} style={{ cursor: "pointer", flexShrink: 0 }}
                   onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))} />
               </span>
@@ -3092,6 +3135,39 @@ function WeekTimeline({ weekDates, onDay, colorOf, timeOf, isAllDay, sel, setSel
     return { top: Math.max(0, top), height };
   }
 
+  // 重なり配置：その日の時刻あり予定に「列(lane)」を割り当て、重なりを横に分割する。
+  // list は {ev, r:{top,height}} を top→bottom 順にソート済みで渡す。
+  // 返り値は各要素に col（列番号）と cols（そのかたまりの総列数）を付与したもの。
+  function assignColumns(list) {
+    const out = [];
+    let cluster = [];       // 現在の「重なりのかたまり」に属する要素
+    let clusterEnd = -1;    // かたまり内の最大 bottom
+    let colEnds = [];       // 各列の最後の予定の bottom
+    const flush = () => {
+      const cols = colEnds.length || 1;
+      cluster.forEach(it => { it.cols = cols; });
+      cluster = []; colEnds = []; clusterEnd = -1;
+    };
+    for (const x of list) {
+      const top = x.r.top;
+      const bottom = x.r.top + x.r.height;
+      if (cluster.length && top >= clusterEnd) flush(); // どの予定とも重ならない→新しいかたまり
+      // 空いている列（その列の最後の予定が現在の開始までに終わっている）を探す
+      let col = -1;
+      for (let c = 0; c < colEnds.length; c++) {
+        if (colEnds[c] <= top) { col = c; break; }
+      }
+      if (col < 0) { col = colEnds.length; colEnds.push(bottom); }
+      else colEnds[col] = bottom;
+      const item = { ...x, col, cols: 1 };
+      cluster.push(item);
+      out.push(item);
+      clusterEnd = Math.max(clusterEnd, bottom);
+    }
+    flush();
+    return out;
+  }
+
   // 終日エリアに出すバー（複数日またがり ＋ 時刻なし終日項目）
   const weekStartYmd = ymd(days[0]);
   const weekEndYmd = ymd(days[6]);
@@ -3181,32 +3257,41 @@ function WeekTimeline({ weekDates, onDay, colorOf, timeOf, isAllDay, sel, setSel
             ))}
           </div>
           {/* 各日カラム */}
-          {days.map((dt, i) => (
-            <div key={i} style={{ position: "relative", height: gridH, borderLeft: `1px solid ${C.line}` }}>
-              {/* 時間の横罫線 */}
-              {hours.map((h, idx) => (
-                <div key={h} style={{ position: "absolute", top: idx * HOUR_H, left: 0, right: 0, borderTop: `1px solid ${C.line}` }} />
-              ))}
-              {/* 予定矩形 */}
-              {onDay(dt).filter(ev => !isAllDay(ev) && !isMultiDay(ev)).map(ev => {
-                const r = rect(ev, dt);
-                if (!r) return null;
-                const col = colorOf(ev);
-                return (
-                  <div key={ev.id} onClick={() => onOpenItem(ev.id)} style={{
-                    position: "absolute", top: r.top, height: r.height, left: 2, right: 2,
-                    background: `${col}26`, borderLeft: `3px solid ${col}`, borderRadius: 5,
-                    padding: "2px 4px", overflow: "hidden", cursor: "pointer",
-                  }}>
-                    <div style={{ fontSize: 9.5, color: col, fontWeight: 600, lineHeight: 1.2,
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      textDecoration: ev.done ? "line-through" : "none" }}>{ev.title}</div>
-                    {r.height > 28 && <div style={{ fontSize: 8.5, color: col, opacity: 0.8 }}>{timeOf(ev, dt)}</div>}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
+          {days.map((dt, i) => {
+            // その日の時刻あり予定を矩形化し、top→bottom 順にソートしてから列を割り当てる
+            const laid = assignColumns(
+              onDay(dt).filter(ev => !isAllDay(ev) && !isMultiDay(ev))
+                .map(ev => ({ ev, r: rect(ev, dt) }))
+                .filter(x => x.r)
+                .sort((a, b) => a.r.top - b.r.top || (a.r.top + a.r.height) - (b.r.top + b.r.height))
+            );
+            return (
+              <div key={i} style={{ position: "relative", height: gridH, borderLeft: `1px solid ${C.line}` }}>
+                {/* 時間の横罫線 */}
+                {hours.map((h, idx) => (
+                  <div key={h} style={{ position: "absolute", top: idx * HOUR_H, left: 0, right: 0, borderTop: `1px solid ${C.line}` }} />
+                ))}
+                {/* 予定矩形（重なりは列に分割して横並び。重ならなければ全幅） */}
+                {laid.map(({ ev, r, col, cols }) => {
+                  const c = colorOf(ev);
+                  const w = 100 / cols; // 1列あたりの割合
+                  return (
+                    <div key={ev.id} onClick={() => onOpenItem(ev.id)} style={{
+                      position: "absolute", top: r.top, height: r.height,
+                      left: `calc(${col * w}% + 2px)`, width: `calc(${w}% - 4px)`,
+                      background: `${c}26`, borderLeft: `3px solid ${c}`, borderRadius: 5,
+                      padding: "2px 4px", overflow: "hidden", cursor: "pointer", zIndex: 1,
+                    }}>
+                      <div style={{ fontSize: 9.5, color: c, fontWeight: 600, lineHeight: 1.2,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        textDecoration: ev.done ? "line-through" : "none" }}>{ev.title}</div>
+                      {r.height > 28 && <div style={{ fontSize: 8.5, color: c, opacity: 0.8 }}>{timeOf(ev, dt)}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -3322,6 +3407,61 @@ function Select({ value, onChange, options, small, colorize, allowEmpty }) {
 }
 
 // ── 詳細パネル：その場で編集・保存・削除 ──
+// テキストから http/https のURLを抽出（末尾の句読点・閉じ括弧は除去。重複は除く）
+function extractUrls(text) {
+  if (!text) return [];
+  const re = /https?:\/\/[^\s"'<>）)】」]+/g;
+  const found = (text.match(re) || []).map(u => u.replace(/[.,。、)）】」]+$/, ""));
+  return Array.from(new Set(found));
+}
+// URLから表示ラベルと種別（アイコン色分け用）を推定
+function urlMeta(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "");
+    const path = u.pathname || "";
+    if (host === "docs.google.com") {
+      if (path.startsWith("/document")) return { label: "Google ドキュメント", kind: "doc" };
+      if (path.startsWith("/spreadsheets")) return { label: "Google スプレッドシート", kind: "sheet" };
+      if (path.startsWith("/presentation")) return { label: "Google スライド", kind: "slide" };
+      return { label: "Google Docs", kind: "doc" };
+    }
+    if (host === "drive.google.com") return { label: "Google ドライブ", kind: "doc" };
+    return { label: host, kind: "web" };
+  } catch { return { label: url, kind: "web" }; }
+}
+// 詳細テキスト内のURLを、クリック可能なリンクチップとして表示（別タブ＋noopener）
+function LinkChips({ text }) {
+  const urls = extractUrls(text);
+  if (!urls.length) return null;
+  const bg = { doc: "#2E5AA8", sheet: "#3C7A5A", slide: "#C9A24B", web: "#6B7688" };
+  return (
+    <div style={{ marginTop: 4 }}>
+      <div style={{ fontSize: 11, color: C.dimmer, margin: "0 2px 6px" }}>本文中のリンク（{urls.length}件）</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {urls.map((url, i) => {
+          const m = urlMeta(url);
+          const short = url.replace(/^https?:\/\//, "");
+          return (
+            <a key={i} href={url} target="_blank" rel="noopener noreferrer" style={{
+              display: "flex", alignItems: "center", gap: 8, textDecoration: "none",
+              border: `1px solid ${C.inkSofter}`, background: C.inkSoft, borderRadius: 10, padding: "8px 10px", color: C.paper }}>
+              <span style={{ width: 24, height: 24, borderRadius: 7, display: "grid", placeItems: "center", flexShrink: 0, background: bg[m.kind] || bg.web }}>
+                <FileText size={12} color="#fff" />
+              </span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.label}</span>
+                <span style={{ display: "block", fontSize: 10.5, color: C.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{short}</span>
+              </span>
+              <ExternalLink size={13} color={C.dimmer} style={{ flexShrink: 0 }} />
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function DetailPanel({ item, masters, onClose, onSave, onDelete, onDuplicate, onToggle, wide }) {
   // item が変わるたびにローカル編集状態を初期化
   const [draft, setDraft] = useState(item);
@@ -3421,6 +3561,9 @@ function DetailPanel({ item, masters, onClose, onSave, onDelete, onDuplicate, on
               style={{ ...inputStyle, resize: "none", lineHeight: 1.6 }} />
             <AutoTextarea value={draft.detail2} onChange={e => set({ detail2: e.target.value })} rows={2} placeholder="詳細2（補足）"
               style={{ ...inputStyle, resize: "none", lineHeight: 1.6 }} />
+
+            {/* 詳細1・詳細2内のURLをクリック可能なリンクとして抽出表示（方法A） */}
+            <LinkChips text={`${draft.detail1 || ""}\n${draft.detail2 || ""}`} />
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {draft.files.map((f, i) => (
