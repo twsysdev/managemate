@@ -54,7 +54,14 @@ export async function POST(req: NextRequest) {
         // モデルは環境変数で上書き可。既定はバランス型。
         model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5",
         max_tokens: 2048,
-        messages: [{ role: "user", content: prompt }],
+        // 本アプリの用途は全て「JSONオブジェクトのみ」を期待するため、
+        // アシスタント発話を "{" でプレフィルして必ずJSONから始めさせる。
+        // これで思考の垂れ流しや前置き・反復ループによる暴走を防ぐ。
+        // （API はプレフィル後の続き部分だけを返すので、下で "{" を前置して復元する）
+        messages: [
+          { role: "user", content: prompt },
+          { role: "assistant", content: "{" },
+        ],
       }),
     });
 
@@ -67,10 +74,12 @@ export async function POST(req: NextRequest) {
     }
 
     const data = (await r.json()) as AnthropicResponse;
-    const text = (data.content ?? [])
+    const cont = (data.content ?? [])
       .filter((b) => b.type === "text" && typeof b.text === "string")
       .map((b) => b.text as string)
       .join("");
+    // プレフィルした "{" を先頭に戻して完全なJSON文字列にする（続きが空なら空のまま返す）
+    const text = cont ? "{" + cont : "";
 
     return NextResponse.json({ text });
   } catch {
