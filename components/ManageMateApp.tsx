@@ -404,6 +404,25 @@ function Ring({ size = 64, stroke = 6, pct = 0, color = C.accent2, track = C.ink
   );
 }
 
+// ── ホーム用のAI示唆（最優先タスクの選定＋提案文）を /api/ai から取得 ──
+// 未完了タスクを渡し、{ priorityId, reason, advice } のJSONを受け取る。失敗時は例外を投げる。
+async function fetchHomeInsights(openTasks, masters) {
+  const labelOf = (ax, id) => { const it = masters[ax] && masters[ax].items.find(x => x.id === id); return it ? it.label : ""; };
+  const today = ymd(new Date());
+  const list = openTasks.slice(0, 40).map(t => {
+    const cls = ["A", "B", "C"].map(ax => labelOf(ax, t[ax])).filter(Boolean).join("/");
+    const due = (t.end || t.start || "").slice(0, 16);
+    return `- id:${t.id} | ${t.title}${cls ? " | 分類:" + cls : ""}${due ? " | 期日:" + due : ""}`;
+  }).join("\n");
+  const prompt = `あなたはタスク管理秘書です。今日(${today})を踏まえ、未完了タスクから「本日の最優先」を1件選び、短い提案をしてください。JSONだけを返す。前置き・コードフェンス不要。
+未完了タスク:
+${list}
+返すJSON: {"priorityId":"<上のidのいずれか>","reason":"選定理由を40字以内で一言","advice":"今日の進め方の提案を60字程度で1〜2文"}`;
+  const raw = await completeAI(prompt);
+  const parsed = parseAIJson(raw);
+  return { priorityId: parsed.priorityId, reason: parsed.reason || "", advice: parsed.advice || "" };
+}
+
 // ── 画面：ホーム（ダッシュボード）──
 // 【本運用での差し替え方針】
 //  このダッシュボードはプレビュー用にダミー値を含む。本番では下記を動的化する：
@@ -419,12 +438,41 @@ function HomeScreen({ items, masters, onOpen, onGoto, wide }) {
   const doneCnt = tasks.filter(t => t.done).length;
   const pct = tasks.length ? Math.round((doneCnt / tasks.length) * 100) : 0; // ← 完了率は実データ連動（本物）
 
-  // 最優先タスク：分類Cが最優先(装飾bold/bg)なものを優先、なければ先頭
-  // 【本番】この選定ロジックを AI 応答（priorityId）で置き換える
-  const priority = openTasks.find(t => {
+  // ── AIによるホームの示唆（最優先タスク＋提案）──
+  // ホーム表示時に一度だけ /api/ai へ問い合わせ、未完了タスクから priorityId・reason・advice を得る。
+  // 失敗時はルールベースにフォールバックし、その理由を画面に添える。
+  const [insights, setInsights] = useState({ status: "idle", priorityId: null, reason: "", advice: "", error: "" });
+  const insightsFetched = useRef(false);
+  const loadInsights = async () => {
+    if (openTasks.length === 0) { setInsights({ status: "empty", priorityId: null, reason: "", advice: "", error: "" }); return; }
+    setInsights(s => ({ ...s, status: "loading", error: "" }));
+    try {
+      const r = await fetchHomeInsights(openTasks, masters);
+      const pid = openTasks.some(t => t.id === r.priorityId) ? r.priorityId : null;
+      setInsights({ status: "ready", priorityId: pid, reason: r.reason || "", advice: r.advice || "", error: "" });
+    } catch (e) {
+      setInsights({ status: "error", priorityId: null, reason: "", advice: "", error: (e && e.message) ? e.message : "原因不明のエラー" });
+    }
+  };
+  React.useEffect(() => {
+    // items がロードされ未完了タスクが揃ったら一度だけ取得（頻繁な再取得はしない＝コスト配慮）
+    if (!insightsFetched.current && openTasks.length > 0) {
+      insightsFetched.current = true;
+      loadInsights();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openTasks.length]);
+
+  // 最優先タスク：AI選定を優先。無効・失敗・未取得時は「装飾Cが最優先→先頭」のルールベース。
+  const heuristicPriority = openTasks.find(t => {
     const c = lookup(masters, "C", t.C);
     return c && (c.deco.bold || c.deco.bg);
   }) || openTasks[0];
+  const priority = (insights.status === "ready" && insights.priorityId
+    ? openTasks.find(t => t.id === insights.priorityId)
+    : null) || heuristicPriority;
+  const aiSelected = insights.status === "ready" && !!insights.priorityId && priority && priority.id === insights.priorityId;
+  const priorityReason = aiSelected ? insights.reason : "";
 
   // 【本番】"2026-06-29" を実際の今日（new Date()）に置き換え、下の timed を today で絞り込む
   const TODAY = ymd(new Date());
@@ -442,10 +490,11 @@ function HomeScreen({ items, masters, onOpen, onGoto, wide }) {
   const hour = new Date().getHours();
   const greet = hour < 11 ? "おはようございます" : hour < 17 ? "こんにちは" : "こんばんは";
 
-  // 【本番】AI提案文はここでバックエンドから取得したテキストを使う（下の固定文言を置換）
-  const aiAdvice = priority
+  // 提案文：AI応答（advice）を優先。失敗・未取得時はルールベースの定型文にフォールバック。
+  const fallbackAdvice = priority
     ? `最優先の「${priority.title}」を午前中に仕上げると、午後の予定に余裕を持って臨めます。`
     : "今日のタスクを整理して、優先度の高いものから着手しましょう。";
+  const aiAdvice = (insights.status === "ready" && insights.advice) ? insights.advice : fallbackAdvice;
 
   return (
     <div style={{ display: wide ? "grid" : "flex", gridTemplateColumns: wide ? "1fr 1fr" : undefined, flexDirection: wide ? undefined : "column", alignItems: wide ? "start" : undefined, gap: 14 }}>
@@ -465,34 +514,61 @@ function HomeScreen({ items, masters, onOpen, onGoto, wide }) {
         <span style={{ fontSize: 13.5, color: C.dimmer }}>タスク、予定、メモを検索…</span>
       </div>
 
-      {/* 本日の最優先タスク */}
-      {priority && (
+      {/* 本日の最優先タスク（AI選定・ローディング/失敗フォールバック対応） */}
+      {(insights.status === "loading" || priority) && (
         <div style={{ ...cardBox, gridColumn: wide ? "1 / -1" : undefined }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <span style={{ fontSize: 13.5, color: C.paper, fontWeight: 700 }}>本日の最優先タスク</span>
-            <span style={{ fontSize: 10.5, color: C.navyDeep, background: C.accent2 + "2A", padding: "2px 8px", borderRadius: 999 }}>AIが選定</span>
+            {insights.status !== "loading" && (
+              <span style={{ fontSize: 10.5, color: aiSelected ? C.mist : C.navyDeep,
+                background: (aiSelected ? C.mist : C.accent2) + "22", padding: "2px 8px", borderRadius: 999 }}>
+                {aiSelected ? "AIが選定" : "簡易選定"}
+              </span>
+            )}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                <Star size={14} color={C.accent2} fill={C.accent2} />
-                <span style={{ fontSize: 10.5, color: C.dim }}>最優先</span>
+
+          {insights.status === "loading" ? (
+            <>
+              <div style={{ height: 16, width: "60%", borderRadius: 7, background: C.line, marginBottom: 9 }} />
+              <div style={{ height: 12, width: "42%", borderRadius: 7, background: C.line, marginBottom: 12 }} />
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 11.5, color: C.dim }}>
+                <Loader size={13} className="spin" /> 今日の状況を分析中…
               </div>
-              <div style={{ fontSize: 16, color: C.paper, fontWeight: 700 }}>{priority.title}</div>
-              <div style={{ display: "flex", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
-                {priority.start && <span style={{ fontSize: 11.5, color: C.dim, display: "inline-flex", gap: 3, alignItems: "center" }}>
-                  <Cal size={11} /> {fmtDate(priority.start)} {fmtTime(priority.start)}</span>}
-                {priority.detail1 && <span style={{ fontSize: 11.5, color: C.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 130 }}>{priority.detail1}</span>}
+            </>
+          ) : (
+            <>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                  <Star size={14} color={C.accent2} fill={C.accent2} />
+                  <span style={{ fontSize: 10.5, color: C.dim }}>最優先</span>
+                </div>
+                <div style={{ fontSize: 16, color: C.paper, fontWeight: 700 }}>{priority.title}</div>
+                <div style={{ display: "flex", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+                  {priority.start && <span style={{ fontSize: 11.5, color: C.dim, display: "inline-flex", gap: 3, alignItems: "center" }}>
+                    <Cal size={11} /> {fmtDate(priority.start)} {fmtTime(priority.start)}</span>}
+                  {priority.detail1 && <span style={{ fontSize: 11.5, color: C.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 130 }}>{priority.detail1}</span>}
+                </div>
+                {priorityReason && (
+                  <div style={{ display: "flex", gap: 5, alignItems: "flex-start", marginTop: 8, fontSize: 11.5, color: C.mist, lineHeight: 1.55 }}>
+                    <Sparkles size={12} color={C.mist} style={{ flexShrink: 0, marginTop: 1 }} />
+                    <span>{priorityReason}</span>
+                  </div>
+                )}
               </div>
-            </div>
-            <Ring pct={70} size={62} color={C.accent2}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: C.paper }}>70%</span>
-            </Ring>
-          </div>
-          <div style={{ display: "flex", gap: 12, marginTop: 14, alignItems: "center" }}>
-            <button onClick={() => onOpen(priority.id)} style={{ ...primaryBtn, marginTop: 0, padding: "10px 16px" }}>タスクを始める</button>
-            <button onClick={() => onOpen(priority.id)} style={{ background: "none", border: "none", color: C.dim, fontSize: 13, cursor: "pointer" }}>詳細を見る</button>
-          </div>
+              <div style={{ display: "flex", gap: 12, marginTop: 14, alignItems: "center" }}>
+                <button onClick={() => onOpen(priority.id)} style={{ ...primaryBtn, marginTop: 0, padding: "10px 16px" }}>タスクを始める</button>
+                <button onClick={() => onOpen(priority.id)} style={{ background: "none", border: "none", color: C.dim, fontSize: 13, cursor: "pointer" }}>詳細を見る</button>
+              </div>
+              {insights.status === "error" && (
+                <div style={{ display: "flex", gap: 7, alignItems: "flex-start", background: C.dawn + "0F",
+                  border: `1px solid ${C.dawn}33`, borderRadius: 10, padding: "8px 10px", marginTop: 12, fontSize: 11, color: C.dim, lineHeight: 1.55 }}>
+                  <span style={{ flexShrink: 0 }}>⚠</span>
+                  <span style={{ flex: 1 }}>AIに接続できないため簡易表示です（理由：{insights.error}）。</span>
+                  <span onClick={() => loadInsights()} style={{ color: C.dawn, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", flexShrink: 0 }}>再試行</span>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -523,9 +599,17 @@ function HomeScreen({ items, masters, onOpen, onGoto, wide }) {
           <Sparkles size={15} color={C.accent2} />
           <span style={{ fontSize: 13.5, color: C.paper, fontWeight: 700 }}>AIからの提案</span>
         </div>
-        <p style={{ margin: "0 0 12px", fontSize: 13, color: C.dim, lineHeight: 1.7 }}>
-          {aiAdvice}
-        </p>
+        {insights.status === "loading" ? (
+          <div style={{ margin: "2px 0 12px" }}>
+            <div style={{ height: 12, width: "92%", borderRadius: 7, background: C.line, marginBottom: 8 }} />
+            <div style={{ height: 12, width: "76%", borderRadius: 7, background: C.line, marginBottom: 8 }} />
+            <div style={{ height: 12, width: "40%", borderRadius: 7, background: C.line }} />
+          </div>
+        ) : (
+          <p style={{ margin: "0 0 12px", fontSize: 13, color: C.dim, lineHeight: 1.7 }}>
+            {aiAdvice}
+          </p>
+        )}
         <button onClick={() => onGoto("chat")} style={{ display: "inline-flex", alignItems: "center", gap: 6,
           background: "none", border: `1px solid ${C.inkSofter}`, color: C.paper, fontSize: 12.5, padding: "8px 14px", borderRadius: 9, cursor: "pointer" }}>
           提案を確認する <ChevR size={14} />
@@ -947,19 +1031,44 @@ function FilterSheet({ masters, fA, setFA, fB, setFB, fC, setFC, sort, setSort, 
   );
 }
 
+// エラー本文（Anthropicのエラー等）から人間可読な理由を取り出す。
+function aiErrorReason(detail) {
+  if (!detail) return "";
+  try {
+    const j = JSON.parse(detail);
+    const msg = (j && j.error && j.error.message) || (j && j.message);
+    if (msg) return String(msg);
+  } catch {}
+  return String(detail).slice(0, 200);
+}
+
 // ── AIバックエンド呼び出し（サーバーの /api/ai 経由で Anthropic を呼ぶ）──
 // APIキーはサーバー専用の環境変数（ANTHROPIC_API_KEY）でのみ扱う。フロントには出さない。
-// キー未設定・通信失敗・空応答時は例外を投げ、呼び出し側でローカル簡易応答にフォールバックする。
+// 失敗時は「なぜ失敗したか」を含む例外を投げる（呼び出し側でユーザーに理由を提示する）。
 async function completeAI(prompt) {
-  const res = await fetch("/api/ai", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ prompt }),
-  });
-  if (!res.ok) throw new Error("AI request failed: " + res.status);
-  const data = await res.json();
-  const text = typeof data?.text === "string" ? data.text : "";
-  if (!text) throw new Error("AI empty response");
+  let res;
+  try {
+    res = await fetch("/api/ai", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+  } catch (e) {
+    throw new Error("AIサーバーに接続できませんでした（ネットワーク未接続、またはサーバーが起動していません）。");
+  }
+  if (!res.ok) {
+    let info = null;
+    try { info = await res.json(); } catch {}
+    const reason = aiErrorReason(info && (info.detail || info.error));
+    if (res.status === 503) throw new Error("AIのAPIキー（ANTHROPIC_API_KEY）がサーバーに設定されていません。");
+    if (res.status === 400) throw new Error("送信内容が不正でした（" + (reason || "リクエスト形式エラー") + "）。");
+    if (res.status === 502) throw new Error("AIサービスがエラーを返しました" + (reason ? "：" + reason : "。混雑や一時的な不具合の可能性があります。") + "");
+    throw new Error("AIサーバーでエラーが発生しました（HTTP " + res.status + (reason ? "：" + reason : "") + "）。");
+  }
+  let data = null;
+  try { data = await res.json(); } catch {}
+  const text = data && typeof data.text === "string" ? data.text : "";
+  if (!text) throw new Error("AIから空の応答が返りました。もう一度お試しください。");
   return text;
 }
 
@@ -1156,21 +1265,30 @@ ${userText}
 - 日時は "YYYY-MM-DDTHH:MM"（終日は "YYYY-MM-DD"）。今日は${new Date().toISOString().slice(0,10)}とする。曜日計算は正確に行う。
 - replyは常に必須。何をしたか一言添える。`;
 
-  // サーバーの /api/ai 経由でAIを呼ぶ。APIキー未設定・通信失敗・空応答時は
-  // ローカルの簡易ルール応答（localFallbackChat）にフォールバックする。
+  // サーバーの /api/ai 経由でAIを呼ぶ。失敗時は「なぜ失敗したか」を明示したうえで、
+  // ローカルの簡易ルール応答（localFallbackChat）も添えて返す。
   let raw;
   try {
     raw = await completeAI(prompt);
   } catch (e) {
-    return localFallbackChat(userText, masters, items);
+    const reason = (e && e.message) ? e.message : "原因不明のエラーが発生しました。";
+    const fb = localFallbackChat(userText, masters, items);
+    return {
+      ...fb,
+      reply: `AIに接続できなかったため、簡易モードで応答しています。\n理由：${reason}\n\n${fb.reply}`,
+    };
   }
   let parsed;
   try {
     parsed = parseAIJson(raw);
   } catch (e) {
     // JSONとして解釈できない場合は、生テキストを返答として扱い、アクションなしにする
+    // （AIは応答したが構造化に失敗したケース。空なら理由を添えて返す）
     const fallback = (raw || "").replace(/```json|```/g, "").trim();
-    return { reply: fallback || "うまく解析できませんでした。表現を変えてもう一度試してください。", action: null };
+    return {
+      reply: fallback || "AIの応答を登録・検索アクションとして解釈できませんでした（理由：応答が期待した形式ではありませんでした）。表現を変えてもう一度お試しください。",
+      action: null,
+    };
   }
 
   const validAx = (ax, id) => masters[ax].items.some(it => it.id === id) ? id : masters[ax].items[0].id;
@@ -1222,12 +1340,43 @@ function ChatScreen({ masters, items, onAddItems, onUpdateItem, onDeleteItems, o
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy]);
 
+  // File → 添付オブジェクト。画像はサムネイル表示用に objectURL を持たせる。
+  // 【本番差し替え】プレビューはサムネイル表示のみ。本番ではファイル本体をアップロードし、
+  // バックエンド経由で画像/PDFをAnthropic APIに添付して中身を解析する。
+  function toAttachment(f, name) {
+    const isImage = (f.type || "").startsWith("image/");
+    return { name: name || f.name || "ファイル", url: isImage ? URL.createObjectURL(f) : null, isImage };
+  }
+  function addFiles(fileList) {
+    const arr = Array.from(fileList || []);
+    if (!arr.length) return;
+    setAttachments(prev => [...prev, ...arr.map(f => toAttachment(f))]);
+  }
   function pickFiles(e) {
-    // 【本番差し替え】プレビューはファイル名のみ扱う。本番ではファイル本体をアップロードし、
-    // バックエンド経由で画像/PDFをAnthropic APIに添付して中身を解析する。
-    const names = Array.from(e.target.files || []).map(f => f.name);
-    setAttachments(prev => [...prev, ...names]);
+    addFiles(e.target.files);
     e.target.value = "";
+  }
+  // クリップボードの画像（スクリーンショット等）を貼り付けたら画像添付にする。
+  function handlePaste(e) {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    const added = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.kind === "file" && (it.type || "").startsWith("image/")) {
+        const f = it.getAsFile();
+        if (!f) continue;
+        const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg");
+        const d = new Date(); const p = (n) => String(n).padStart(2, "0");
+        const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+        const name = `スクリーンショット-${stamp}${added.length ? "-" + (added.length + 1) : ""}.${ext}`;
+        added.push(toAttachment(f, name));
+      }
+    }
+    if (added.length) {
+      e.preventDefault(); // 画像を貼ったときはテキストとして貼り付けさせない
+      setAttachments(prev => [...prev, ...added]);
+    }
   }
 
   async function send() {
@@ -1236,8 +1385,9 @@ function ChatScreen({ masters, items, onAddItems, onUpdateItem, onDeleteItems, o
     const files = attachments;
     const history = messages.map(m => ({ role: m.role === "user" ? "user" : "ai", text: m.text }));
     // 送信メッセージにファイル情報を含める（本文にも添えてAIに伝える）
+    const fileNames = files.map(a => (typeof a === "string" ? a : a.name));
     const textForAI = files.length
-      ? `${text}${text ? "\n" : ""}[添付ファイル: ${files.join(", ")}]`
+      ? `${text}${text ? "\n" : ""}[添付ファイル: ${fileNames.join(", ")}]`
       : text;
     setMessages(m => [...m, { role: "user", text, files }]);
     setInput(""); setAttachments([]); setBusy(true);
@@ -1245,7 +1395,8 @@ function ChatScreen({ masters, items, onAddItems, onUpdateItem, onDeleteItems, o
       const { reply, action } = await chatWithAI(history, textForAI, masters, items, files.length > 0);
       setMessages(m => [...m, { role: "ai", text: reply, action }]);
     } catch (e) {
-      setMessages(m => [...m, { role: "ai", text: "うまく処理できませんでした。もう一度試してください。" }]);
+      const reason = (e && e.message) ? e.message : "";
+      setMessages(m => [...m, { role: "ai", text: "うまく処理できませんでした。" + (reason ? `\n理由：${reason}` : "もう一度試してください。") }]);
     } finally {
       setBusy(false);
     }
@@ -1324,13 +1475,20 @@ function ChatScreen({ masters, items, onAddItems, onUpdateItem, onDeleteItems, o
             {m.text ? <Bubble role={m.role} text={m.text} /> : null}
             {m.files && m.files.length > 0 && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6, justifyContent: "flex-end" }}>
-                {m.files.map((f, fi) => (
-                  <span key={fi} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5,
-                    background: C.gold + "14", border: `1px solid ${C.gold}33`, borderRadius: 999, padding: "4px 10px", color: C.goldSoft, maxWidth: 200 }}>
-                    <FileText size={11} />
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f}</span>
-                  </span>
-                ))}
+                {m.files.map((f, fi) => {
+                  const label = typeof f === "string" ? f : f.name;
+                  const url = typeof f === "string" ? null : f.url;
+                  return (
+                    <span key={fi} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5,
+                      background: C.gold + "14", border: `1px solid ${C.gold}33`, borderRadius: 999,
+                      padding: url ? "3px 10px 3px 3px" : "4px 10px", color: C.goldSoft, maxWidth: 200 }}>
+                      {url
+                        ? <img src={url} alt={label} style={{ width: 20, height: 20, borderRadius: 5, objectFit: "cover", flexShrink: 0 }} />
+                        : <FileText size={11} />}
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                    </span>
+                  );
+                })}
               </div>
             )}
             {m.action && m.action.type === "register" && (
@@ -1360,15 +1518,22 @@ function ChatScreen({ masters, items, onAddItems, onUpdateItem, onDeleteItems, o
       {/* 添付チップ（あれば入力欄の上に表示） */}
       {attachments.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingTop: 10 }}>
-          {attachments.map((f, i) => (
-            <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
-              background: C.inkSoft, border: `1px solid ${C.inkSofter}`, borderRadius: 999, padding: "5px 10px", color: C.paper, maxWidth: 200 }}>
-              <FileText size={12} color={C.dim} />
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f}</span>
-              <X size={12} color={C.dim} style={{ cursor: "pointer", flexShrink: 0 }}
-                onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))} />
-            </span>
-          ))}
+          {attachments.map((f, i) => {
+            const label = typeof f === "string" ? f : f.name;
+            const url = typeof f === "string" ? null : f.url;
+            return (
+              <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12,
+                background: C.inkSoft, border: `1px solid ${C.inkSofter}`, borderRadius: 999,
+                padding: url ? "4px 10px 4px 4px" : "5px 10px", color: C.paper, maxWidth: 200 }}>
+                {url
+                  ? <img src={url} alt={label} style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />
+                  : <FileText size={12} color={C.dim} />}
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                <X size={12} color={C.dim} style={{ cursor: "pointer", flexShrink: 0 }}
+                  onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))} />
+              </span>
+            );
+          })}
         </div>
       )}
 
@@ -1382,7 +1547,8 @@ function ChatScreen({ masters, items, onAddItems, onUpdateItem, onDeleteItems, o
         <input ref={fileInput} type="file" multiple onChange={pickFiles} style={{ display: "none" }} />
         <AutoTextarea value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } }}
-          rows={1} maxRows={10} placeholder="メッセージ（⌘/Ctrl+Enterで送信）"
+          onPaste={handlePaste}
+          rows={1} maxRows={10} placeholder="メッセージ（⌘/Ctrl+Enterで送信・画像は貼り付けで添付）"
           style={{ ...inputStyle, resize: "none", lineHeight: 1.6 }} />
         <button onClick={send} disabled={busy || (!input.trim() && attachments.length === 0)} style={{
           width: 44, height: 42, borderRadius: 11, border: "none", flexShrink: 0,

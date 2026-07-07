@@ -133,7 +133,7 @@ export async function fetchEvents(
   calendarId: string,
   timeMin: string,
   timeMax: string
-): Promise<GCalEvent[]> {
+): Promise<{ items: GCalEvent[]; timeZone: string }> {
   const p = new URLSearchParams({
     singleEvents: "true",
     orderBy: "startTime",
@@ -147,17 +147,43 @@ export async function fetchEvents(
     )}/events?${p.toString()}`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
-  if (!res.ok) return [];
+  if (!res.ok) return { items: [], timeZone: "" };
   const j = await res.json();
-  return j.items || [];
+  // j.timeZone はカレンダーの既定タイムゾーン（例: "Asia/Tokyo"）
+  return { items: j.items || [], timeZone: j.timeZone || "" };
 }
 
-// Google の日時 → アプリ形式（"YYYY-MM-DDTHH:MM" or 終日 "YYYY-MM-DD"）
-// dateTime は先頭16文字が現地の壁時計時刻なのでそのまま採用（タイムゾーンずれ回避）
-function fmtGoogleDate(d?: { dateTime?: string; date?: string }): string {
+// カレンダーの timeZone が取れないときのフォールバック（本アプリは日本時間基準）
+const DEFAULT_TZ = "Asia/Tokyo";
+
+// RFC3339（"...Z"＝UTC / "...+09:00"＝オフセット付き 等）を、
+// 指定タイムゾーンの「壁時計」YYYY-MM-DDTHH:MM に変換する。
+// ・文字列の先頭16文字を切るだけだと、GoogleがUTC(Z)で返す予定で時刻がずれるため、
+//   一度 Date（絶対時刻）にしてから対象TZの現地時刻へ変換する。
+function toWallClock(iso: string, tz: string): string {
+  const dt = new Date(iso);
+  if (isNaN(dt.getTime())) return iso.slice(0, 16); // 念のためのフォールバック
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz || DEFAULT_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(dt);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value || "";
+  let hh = get("hour");
+  if (hh === "24") hh = "00"; // 一部環境で 24:00 表記になるのを 00:00 に補正
+  return `${get("year")}-${get("month")}-${get("day")}T${hh}:${get("minute")}`;
+}
+
+// Google の日時 → アプリ形式（時刻あり "YYYY-MM-DDTHH:MM" / 終日 "YYYY-MM-DD"）
+// 時刻ありは絶対時刻としてパースし、カレンダーのタイムゾーンの壁時計に変換（UTC/オフセット両対応）。
+function fmtGoogleDate(d: { dateTime?: string; date?: string } | undefined, tz: string): string {
   if (!d) return "";
-  if (d.dateTime) return d.dateTime.slice(0, 16);
-  return d.date || "";
+  if (d.dateTime) return toWallClock(d.dateTime, tz);
+  return d.date || ""; // 終日は日付のみ（タイムゾーン変換しない）
 }
 
 export interface AppExtCalendar {
@@ -178,18 +204,18 @@ export async function loadGoogleCalendars(
   const list = (await fetchCalendarList(accessToken)).slice(0, 12);
   const results = await Promise.all(
     list.map(async (c) => {
-      const events = await fetchEvents(accessToken, c.id, timeMin, timeMax);
+      const { items, timeZone } = await fetchEvents(accessToken, c.id, timeMin, timeMax);
       return {
         id: c.id,
         name: c.summary || (c.primary ? "メイン" : "カレンダー"),
         color: c.backgroundColor || "#4285F4",
         source: "Google",
         enabled: c.selected !== false,
-        events: events.map((ev) => ({
+        events: items.map((ev) => ({
           id: ev.id,
           title: ev.summary || "(タイトルなし)",
-          start: fmtGoogleDate(ev.start),
-          end: fmtGoogleDate(ev.end),
+          start: fmtGoogleDate(ev.start, timeZone),
+          end: fmtGoogleDate(ev.end, timeZone),
           meet: ev.hangoutLink || "",
         })),
       };
