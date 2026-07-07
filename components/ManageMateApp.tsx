@@ -1103,7 +1103,7 @@ ${axisDesc}
   const parsed = parseAIJson(raw);
 
   // 返ってきた id がマスタに存在するか検証。なければ先頭にフォールバック
-  const valid = (ax, id) => masters[ax].items.some(it => it.id === id) ? id : masters[ax].items[0].id;
+  const valid = (ax, id) => masters[ax].items.some(it => it.id === id) ? id : (masters[ax].items[0]?.id || "");
   return {
     kind: parsed.kind === "memo" ? "memo" : "task",
     title: (parsed.title || "").trim() || text.slice(0, 24),
@@ -1117,7 +1117,7 @@ ${axisDesc}
 function localFallbackChat(userText, masters, items) {
   const t = (userText || "").trim();
   const low = t.toLowerCase();
-  const a0 = masters.A.items[0].id, b0 = masters.B.items[0].id, c0 = masters.C.items[0].id;
+  const a0 = masters.A.items[0]?.id || "", b0 = masters.B.items[0]?.id || "", c0 = masters.C.items[0]?.id || "";
 
   // 日付表現をざっくり解釈（基準日 2026-06-29）
   const base = new Date();
@@ -1293,7 +1293,7 @@ ${userText}
     };
   }
 
-  const validAx = (ax, id) => masters[ax].items.some(it => it.id === id) ? id : masters[ax].items[0].id;
+  const validAx = (ax, id) => masters[ax].items.some(it => it.id === id) ? id : (masters[ax].items[0]?.id || "");
 
   // 登録アクションのid検証
   if (parsed.action && parsed.action.type === "register") {
