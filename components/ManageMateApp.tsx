@@ -3989,4 +3989,16 @@ const primaryBtn = { marginTop: 14, display: "inline-flex", alignItems: "center"
   fontSize: 14, fontWeight: 600, cursor: "pointer" };
 const ghostBtnFull = { padding: "12px 16px", borderRadius: 11, border: `1px solid ${C.inkSofter}`,
   background: "transparent", color: C.dim, fontSize: 14, cursor: "pointer", whiteSpace: "nowrap" };
-const che
+const checkbox = (done) => ({ marginTop: 2, width: 22, height: 22, borderRadius: 7, flexShrink: 0,
+  border: `1.5px solid ${done ? C.mist : C.dim}`, background: done ? C.mist : "transparent",
+  display: "grid", placeItems: "center", cursor: "pointer" });
+const chip = (active) => ({ padding: "7px 13px", borderRadius: 999, fontSize: 12.5, cursor: "pointer",
+  border: `1px solid ${active ? C.gold + "55" : C.inkSofter}`,
+  background: active ? C.gold + "14" : "transparent", color: active ? C.goldSoft : C.dim, whiteSpace: "nowrap" });
+const pill = (on) => ({ padding: "6px 12px", borderRadius: 999, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap",
+  border: `1px solid ${on ? C.gold + "66" : C.inkSofter}`, background: on ? C.gold + "1A" : "transparent",
+  color: on ? C.goldSoft : C.dim, fontWeight: on ? 600 : 400 });
+const bigToggle = (active) => ({ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+  padding: "11px 0", borderRadius: 12, fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap",
+  border: `1px solid ${active ? C.gold + "55" : C.inkSofter}`,
+  background: active ? C.gold + "14" : "transparent", color: active ? C.goldSoft : C.dim });
