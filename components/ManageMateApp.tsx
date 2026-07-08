@@ -1892,8 +1892,9 @@ function CaptureScreen({ masters, onAddItem, zoom, initialStart, onConsumeInitia
           <Select value={Cc} onChange={setCc} options={masters.C.items} small colorize allowEmpty />
         </div>
 
-        {/* 日時（終日チェック内包・15分刻み） */}
-        <DateTimeField start={start} end={end} onChange={(s, e) => { setStart(s); setEnd(e); }} />
+        {/* 日時（終日チェック内包・15分刻み）＋ 通知（終日行の右。メモは対象外） */}
+        <DateTimeField start={start} end={end} onChange={(s, e) => { setStart(s); setEnd(e); }}
+          notify={notify} onNotifyChange={recKind !== "memo" ? setNotify : undefined} />
 
         {/* Zoom会議を作成（予定＋連携時のみ） */}
         {recKind === "event" && zoom && zoom.connected && (
@@ -1907,22 +1908,6 @@ function CaptureScreen({ masters, onAddItem, zoom, initialStart, onConsumeInitia
             <button onClick={() => setMakeZoom(v => !v)} style={{ width: 44, height: 25, borderRadius: 999, border: "none", cursor: "pointer", flexShrink: 0, position: "relative", background: makeZoom ? "#2D8CFF" : C.inkSofter }}>
               <span style={{ position: "absolute", top: 2, left: makeZoom ? 21 : 2, width: 21, height: 21, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 3px rgba(0,0,0,.2)" }} />
             </button>
-          </div>
-        )}
-
-        {/* 通知（タスク・予定のみ。メモは対象外） */}
-        {recKind !== "memo" && (
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
-              <Bell size={13} color={C.dim} />
-              <span style={{ fontSize: 12, color: C.dim }}>通知（未設定なら全体設定に従う）</span>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              <button onClick={() => setNotify(null)} style={pill(notify === null)}>既定</button>
-              {NOTIFY_OPTIONS.map(o => (
-                <button key={o.v} onClick={() => setNotify(o.v)} style={pill(notify === o.v)}>{o.label}</button>
-              ))}
-            </div>
           </div>
         )}
 
@@ -3356,8 +3341,22 @@ function WeekTimeline({ weekDates, onDay, colorOf, timeOf, isAllDay, sel, setSel
 // 自動で高さが伸びるテキストエリア（入力量に応じて拡張。最小高さはrowsで指定）
 // 日時入力（終日チェック内包・時刻は15分刻み）。start/end 文字列を受け取り onChange(start,end) で返す。
 // 終日=日付のみ "YYYY-MM-DD" / 時刻あり="YYYY-MM-DDTHH:MM"
-function DateTimeField({ start, end, onChange }) {
+// 15分刻みの時刻候補（"HH:MM" を 00:00〜23:45 で96件）
+const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) =>
+  `${String(Math.floor(i / 4)).padStart(2, "0")}:${String((i % 4) * 15).padStart(2, "0")}`
+);
+const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+// 日時フィールド。
+//  ・終日チェックと同じ行の右側に「通知」プルダウン（アイコンのみ・省スペース）を配置。
+//    onNotifyChange を渡したときだけ表示（メモなど通知対象外では省略）。
+//  ・時刻は15分刻みのセレクトで選択（終日OFF時）。
+function DateTimeField({ start, end, onChange, notify, onNotifyChange }) {
   const allDay = !((start || "").includes("T") || (end || "").includes("T"));
+  const showNotify = typeof onNotifyChange === "function";
   const setAllDay = (v) => {
     if (v) {
       onChange(start ? start.slice(0, 10) : "", end ? end.slice(0, 10) : "");
@@ -3365,30 +3364,55 @@ function DateTimeField({ start, end, onChange }) {
       onChange(start ? start.slice(0, 10) + "T09:00" : "", end ? end.slice(0, 10) + "T10:00" : "");
     }
   };
+  const datePart = (v) => (v || "").slice(0, 10);
+  const timePart = (v) => { const s = v || ""; const i = s.indexOf("T"); return i >= 0 ? s.slice(i + 1, i + 6) : ""; };
+  const combine = (d, t) => (d || t) ? `${d || localToday()}T${t || "00:00"}` : "";
+  // 現在値が15分グリッド外なら候補の先頭に足して選択可能にする
+  const timeOpts = (cur) => (cur && !TIME_OPTIONS.includes(cur)) ? [cur, ...TIME_OPTIONS] : TIME_OPTIONS;
+
+  const renderRow = (lab, val, apply) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span style={{ fontSize: 11, color: C.dimmer, width: 30, flexShrink: 0 }}>{lab}</span>
+      {allDay
+        ? <input type="date" value={datePart(val)} onChange={e => apply(e.target.value)} style={dtStyle} />
+        : <>
+            <input type="date" value={datePart(val)} onChange={e => apply(combine(e.target.value, timePart(val) || "00:00"))} style={{ ...dtStyle, flex: 1 }} />
+            <select value={timePart(val)} onChange={e => apply(combine(datePart(val), e.target.value))} style={{ ...dtStyle, width: 92, flexShrink: 0, cursor: "pointer" }}>
+              {!timePart(val) && <option value="">--:--</option>}
+              {timeOpts(timePart(val)).map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </>}
+    </div>
+  );
+
   return (
     <div style={{ border: `1px solid ${C.inkSofter}`, borderRadius: 12, padding: 10, display: "flex", flexDirection: "column", gap: 8, background: C.inkSoft }}>
-      {/* 終日チェック（UIの中に配置） */}
-      <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", alignSelf: "flex-start" }}>
-        <span onClick={() => setAllDay(!allDay)} style={{ width: 18, height: 18, borderRadius: 5, display: "grid", placeItems: "center",
-          border: `1.5px solid ${allDay ? C.gold : C.dimmer}`, background: allDay ? C.gold : "transparent" }}>
-          {allDay && <Check size={12} color={C.onAccent} strokeWidth={3} />}
-        </span>
-        <span style={{ fontSize: 13, color: allDay ? C.goldSoft : C.dim, fontWeight: allDay ? 600 : 400 }} onClick={() => setAllDay(!allDay)}>終日</span>
-      </label>
+      {/* 終日チェック ＋ 通知（同じ行・右寄せ） */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+          <span onClick={() => setAllDay(!allDay)} style={{ width: 18, height: 18, borderRadius: 5, display: "grid", placeItems: "center",
+            border: `1.5px solid ${allDay ? C.gold : C.dimmer}`, background: allDay ? C.gold : "transparent" }}>
+            {allDay && <Check size={12} color={C.onAccent} strokeWidth={3} />}
+          </span>
+          <span style={{ fontSize: 13, color: allDay ? C.goldSoft : C.dim, fontWeight: allDay ? 600 : 400 }} onClick={() => setAllDay(!allDay)}>終日</span>
+        </label>
+        {showNotify && (
+          <div title="通知タイミング（未設定＝全体設定に従う）" style={{ display: "flex", alignItems: "center", gap: 5,
+            border: `1px solid ${C.inkSofter}`, borderRadius: 8, padding: "5px 8px", background: C.ink, flexShrink: 0 }}>
+            <Bell size={13} color={C.accent2} />
+            <select value={notify == null ? "" : String(notify)}
+              onChange={e => onNotifyChange(e.target.value === "" ? null : Number(e.target.value))}
+              style={{ border: "none", background: "transparent", color: C.paper, fontSize: 12, outline: "none", fontFamily: "inherit", cursor: "pointer", padding: "1px 2px" }}>
+              <option value="">既定</option>
+              {NOTIFY_OPTIONS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
       {/* 開始・終了 */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 11, color: C.dimmer, width: 30, flexShrink: 0 }}>開始</span>
-          {allDay
-            ? <input type="date" value={start ? start.slice(0, 10) : ""} onChange={e => onChange(e.target.value, end)} style={dtStyle} />
-            : <input type="datetime-local" step="900" value={start || ""} onChange={e => onChange(e.target.value, end)} style={dtStyle} />}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 11, color: C.dimmer, width: 30, flexShrink: 0 }}>終了</span>
-          {allDay
-            ? <input type="date" value={end ? end.slice(0, 10) : ""} onChange={e => onChange(start, e.target.value)} style={dtStyle} />
-            : <input type="datetime-local" step="900" value={end || ""} onChange={e => onChange(start, e.target.value)} style={dtStyle} />}
-        </div>
+        {renderRow("開始", start, (v) => onChange(v, end))}
+        {renderRow("終了", end, (v) => onChange(start, v))}
       </div>
     </div>
   );
@@ -3402,21 +3426,20 @@ function AutoTextarea({ value, onChange, rows = 3, maxRows, placeholder, style, 
   const ref = useRef(null);
   const resize = (el) => {
     if (!el) return;
-    if (!el.value) { el.style.height = ""; el.style.overflowY = "hidden"; return; } // 空ならrows既定高さに戻す
+    // 行高・上下パディング・枠線から rows 分の最低高さと maxRows 上限を算出
+    const cs = window.getComputedStyle(el);
+    const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.6;
+    const padV = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    const bd = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+    const min = lh * rows + padV + bd;                       // rows 分は必ず確保（入力開始で縮ませない）
+    const cap = maxRows ? lh * maxRows + padV + bd : Infinity;
     el.style.height = "auto";
-    // 上限（px）を maxRows と実際の行高・上下パディングから算出
-    let cap = Infinity;
-    if (maxRows) {
-      const cs = window.getComputedStyle(el);
-      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.6;
-      const padV = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
-      cap = lh * maxRows + padV;
-    }
-    const h = Math.min(el.scrollHeight, cap);
+    const h = Math.min(Math.max(el.scrollHeight, min), cap);
     el.style.height = h + "px";
     el.style.overflowY = el.scrollHeight > cap ? "auto" : "hidden";
   };
-  React.useEffect(() => { resize(ref.current); }, [value]);
+  // 描画前に高さを確定してチラつき／スクロール飛びを防止（onChange と二重実行しない）
+  React.useLayoutEffect(() => { resize(ref.current); }, [value]);
   return (
     <textarea
       {...rest}
@@ -3424,8 +3447,8 @@ function AutoTextarea({ value, onChange, rows = 3, maxRows, placeholder, style, 
       value={value}
       rows={rows}
       placeholder={placeholder}
-      onChange={(e) => { onChange(e); resize(e.target); }}
-      style={{ ...style, overflow: "hidden" }}
+      onChange={onChange}
+      style={{ ...style, overflow: "hidden", boxSizing: "border-box" }}
     />
   );
 }
@@ -3648,7 +3671,8 @@ function DetailPanel({ item, masters, onClose, onSave, onDelete, onDuplicate, on
               ))}
             </div>
 
-            <DateTimeField start={draft.start || ""} end={draft.end || ""} onChange={(s, e) => set({ start: s, end: e })} />
+            <DateTimeField start={draft.start || ""} end={draft.end || ""} onChange={(s, e) => set({ start: s, end: e })}
+              notify={draft.notify} onNotifyChange={draft.kind !== "memo" ? (v) => set({ notify: v }) : undefined} />
 
             {/* Zoom会議：予定に会議を紐づけ／表示（連携時のみ） */}
             {draft.kind === "event" && (
@@ -3674,21 +3698,6 @@ function DetailPanel({ item, masters, onClose, onSave, onDelete, onDuplicate, on
               ) : (
                 <div style={{ fontSize: 11.5, color: C.dimmer, marginTop: 2 }}>設定 &gt; 連携カレンダー でZoomを接続すると、この予定にZoom会議を作成できます。</div>
               )
-            )}
-
-            {draft.kind !== "memo" && (
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
-                  <Bell size={13} color={C.dim} />
-                  <span style={{ fontSize: 12, color: C.dim }}>通知（未設定なら全体設定に従う）</span>
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  <button onClick={() => set({ notify: null })} style={pill(draft.notify == null)}>既定</button>
-                  {NOTIFY_OPTIONS.map(o => (
-                    <button key={o.v} onClick={() => set({ notify: o.v })} style={pill(draft.notify === o.v)}>{o.label}</button>
-                  ))}
-                </div>
-              </div>
             )}
 
             <AutoTextarea value={draft.detail1} onChange={e => set({ detail1: e.target.value })} rows={3} placeholder="詳細1"
@@ -3980,16 +3989,4 @@ const primaryBtn = { marginTop: 14, display: "inline-flex", alignItems: "center"
   fontSize: 14, fontWeight: 600, cursor: "pointer" };
 const ghostBtnFull = { padding: "12px 16px", borderRadius: 11, border: `1px solid ${C.inkSofter}`,
   background: "transparent", color: C.dim, fontSize: 14, cursor: "pointer", whiteSpace: "nowrap" };
-const checkbox = (done) => ({ marginTop: 2, width: 22, height: 22, borderRadius: 7, flexShrink: 0,
-  border: `1.5px solid ${done ? C.mist : C.dim}`, background: done ? C.mist : "transparent",
-  display: "grid", placeItems: "center", cursor: "pointer" });
-const chip = (active) => ({ padding: "7px 13px", borderRadius: 999, fontSize: 12.5, cursor: "pointer",
-  border: `1px solid ${active ? C.gold + "55" : C.inkSofter}`,
-  background: active ? C.gold + "14" : "transparent", color: active ? C.goldSoft : C.dim, whiteSpace: "nowrap" });
-const pill = (on) => ({ padding: "6px 12px", borderRadius: 999, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap",
-  border: `1px solid ${on ? C.gold + "66" : C.inkSofter}`, background: on ? C.gold + "1A" : "transparent",
-  color: on ? C.goldSoft : C.dim, fontWeight: on ? 600 : 400 });
-const bigToggle = (active) => ({ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-  padding: "11px 0", borderRadius: 12, fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap",
-  border: `1px solid ${active ? C.gold + "55" : C.inkSofter}`,
-  background: active ? C.gold + "14" : "transparent", color: active ? C.goldSoft : C.dim });
+const che

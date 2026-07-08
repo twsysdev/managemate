@@ -50,9 +50,11 @@ export function useZoom() {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // 診断しやすいよう、Zoomからの詳細（あれば）を短く添える。
+        const detail = typeof j.detail === "string" && j.detail ? `（詳細: ${j.detail.slice(0, 200)}）` : "";
         if (j.error === "not_connected") throw new Error("Zoomが未接続です。設定から接続してください。");
-        if (j.error === "reauth_required") throw new Error("Zoomの再接続が必要です。設定から接続し直してください。");
-        throw new Error("Zoom会議の作成に失敗しました。");
+        if (j.error === "reauth_required") throw new Error(`Zoomの再接続が必要です。設定から接続し直してください。${detail}`);
+        throw new Error(`Zoom会議の作成に失敗しました。${detail}`);
       }
       return { id: j.id || "", join_url: j.join_url || "", passcode: j.passcode || "" };
     },
