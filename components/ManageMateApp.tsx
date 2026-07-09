@@ -18,6 +18,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { isPushSupported, getPushStatus, enablePush, disablePush, sendTestPush, registerServiceWorker } from "@/lib/push";
+import { fetchMaintenanceState, pruneCronLogs } from "@/lib/maintenance";
 import { useItems } from "@/lib/useItems";
 import { useSettings } from "@/lib/useSettings";
 import { useGoogleCalendar } from "@/lib/useGoogleCalendar";
@@ -2384,6 +2385,64 @@ function PushCard() {
   );
 }
 
+// ── 部品：cron 実行ログの手動削除（容量対策）──
+// 毎分の配信チェックで pg_cron が実行ログ(cron.job_run_details)を貯めるため、
+// このボタンで古いログ（3日より前）をまとめて削除できる。最終実行日も表示。
+function MaintenanceCard() {
+  const [lastRun, setLastRun] = useState(null);
+  const [lastDeleted, setLastDeleted] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    fetchMaintenanceState()
+      .then((s) => { if (s) { setLastRun(s.last_run_at); setLastDeleted(s.last_deleted); } })
+      .catch(() => {});
+  }, []);
+
+  const card = { background: C.inkSoft, border: `1px solid ${C.inkSofter}`, borderRadius: 14, padding: 14, marginBottom: 12 };
+  const btn = {
+    fontSize: 13, fontWeight: 700, padding: "8px 14px", borderRadius: 10, cursor: busy ? "default" : "pointer",
+    border: "none", background: C.gold, color: C.onAccent, opacity: busy ? 0.6 : 1, whiteSpace: "nowrap",
+  };
+  const fmt = (v) => {
+    if (!v) return "未実行";
+    try {
+      return new Date(v).toLocaleString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    } catch { return String(v); }
+  };
+
+  const run = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const r = await pruneCronLogs(3);
+      setLastRun(r.last_run_at);
+      setLastDeleted(r.deleted);
+      setMsg(`${r.deleted} 件の古いログを削除しました。`);
+    } catch {
+      setMsg("削除に失敗しました。DB側のSQL関数（prune_cron_logs）が未作成か、権限をご確認ください。");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div style={card}>
+      <div style={{ fontSize: 14, color: C.paper, fontWeight: 600 }}>通知ログの削除</div>
+      <div style={{ fontSize: 11.5, color: C.dim, marginTop: 2, marginBottom: 10 }}>
+        自動送信の実行ログ（3日より古いもの）を削除して容量を抑えます。
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <button disabled={busy} onClick={run} style={btn}>ログ削除</button>
+        <div style={{ fontSize: 11.5, color: C.dim }}>
+          最終実行日: {fmt(lastRun)}
+          {lastDeleted != null && lastRun ? `（${lastDeleted}件削除）` : ""}
+        </div>
+      </div>
+      {msg && <div style={{ fontSize: 11.5, color: C.dim, marginTop: 10 }}>{msg}</div>}
+    </div>
+  );
+}
+
 // ── 画面：通知設定 ──
 function NotifySettingsScreen({ settings, setSettings, onBack }) {
   const set = (patch) => setSettings(s => ({ ...s, ...patch }));
@@ -2476,6 +2535,9 @@ function NotifySettingsScreen({ settings, setSettings, onBack }) {
           </div>
         </>
       )}
+
+      {/* cron 実行ログの手動削除（容量対策）＋最終実行日 */}
+      <MaintenanceCard />
 
       <div style={{ fontSize: 11.5, color: C.dimmer, lineHeight: 1.7, padding: "0 4px" }}>
         ※ 上の「この端末の通知」を有効にすると、Web Push でデスクトップ通知・スマホのプッシュ通知が届きます（アプリを閉じていても配信）。配信のタイミングはここで設定したリード時間・静音時間に従います。
