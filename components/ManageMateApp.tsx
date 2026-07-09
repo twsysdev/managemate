@@ -16,7 +16,8 @@
 //   - デモ基準日 "2026-06-29" 固定 → 実日付
 // ─────────────────────────────────────────────────────────────
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import { isPushSupported, getPushStatus, enablePush, disablePush, sendTestPush, registerServiceWorker } from "@/lib/push";
 import { useItems } from "@/lib/useItems";
 import { useSettings } from "@/lib/useSettings";
 import { useGoogleCalendar } from "@/lib/useGoogleCalendar";
@@ -2303,6 +2304,86 @@ function ExtCalendarScreen({ extCalendars = [], connected, email, loading, onCon
   );
 }
 
+// ── 部品：この端末のプッシュ通知許可（デスクトップ通知／スマホのプッシュ通知）──
+// OS/ブラウザの通知許可は端末ごと。ここで許可 → Web Push 購読を作り、
+// サーバー（Edge Function）がアプリを閉じていても通知を届けられるようにする。
+function PushCard() {
+  const [status, setStatus] = useState("default"); // unsupported/denied/default/subscribed/granted-unsubscribed
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const refresh = () => { getPushStatus().then(setStatus).catch(() => setStatus("unsupported")); };
+  useEffect(() => { refresh(); }, []);
+
+  const card = { background: C.inkSoft, border: `1px solid ${C.inkSofter}`, borderRadius: 14, padding: 14, marginBottom: 12 };
+  const rowBetween = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 };
+  const btn = (primary) => ({
+    fontSize: 13, fontWeight: 700, padding: "8px 14px", borderRadius: 10, cursor: busy ? "default" : "pointer",
+    border: primary ? "none" : `1px solid ${C.inkSofter}`, background: primary ? C.gold : "transparent",
+    color: primary ? C.onAccent : C.paper, opacity: busy ? 0.6 : 1, whiteSpace: "nowrap",
+  });
+
+  const on = async () => {
+    setBusy(true); setMsg("");
+    const r = await enablePush();
+    setMsg(r.ok ? "この端末で通知を有効にしました。" : (r.error || "有効化に失敗しました。"));
+    await refresh(); setBusy(false);
+  };
+  const off = async () => {
+    setBusy(true); setMsg("");
+    await disablePush();
+    setMsg("この端末の通知を解除しました。");
+    await refresh(); setBusy(false);
+  };
+  const test = async () => {
+    setBusy(true); setMsg("");
+    const r = await sendTestPush();
+    setMsg(r.ok ? "テスト通知を送信しました。数秒以内に届きます。" : (r.error || "テスト送信に失敗しました。"));
+    setBusy(false);
+  };
+
+  const statusText = {
+    unsupported: "この環境（ブラウザ）はプッシュ通知に対応していません。",
+    denied: "通知がブロックされています。ブラウザのサイト設定から許可してください。",
+    default: "未設定。ボタンを押すとこの端末で通知を受け取れます。",
+    "granted-unsubscribed": "許可済みですが購読が未作成です。有効化し直してください。",
+    subscribed: "この端末は通知を受け取れます。",
+  }[status] || "";
+
+  return (
+    <div style={card}>
+      <div style={{ ...rowBetween, marginBottom: 8 }}>
+        <div>
+          <div style={{ fontSize: 14, color: C.paper, fontWeight: 600 }}>この端末の通知（デスクトップ／スマホ）</div>
+          <div style={{ fontSize: 11.5, color: C.dim, marginTop: 2 }}>{statusText}</div>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {status === "subscribed" ? (
+          <button disabled={busy} onClick={off} style={btn(false)}>この端末を解除</button>
+        ) : (
+          <button disabled={busy || status === "unsupported" || status === "denied"} onClick={on} style={btn(true)}>
+            この端末で通知を有効にする
+          </button>
+        )}
+        {/* テスト送信は常時表示。未購読のうちは無効化してヒントを出す */}
+        <button
+          disabled={busy || status !== "subscribed"}
+          onClick={test}
+          style={btn(status === "subscribed")}
+          title={status === "subscribed" ? "" : "先にこの端末で通知を有効にしてください"}
+        >
+          テスト送信
+        </button>
+      </div>
+      {msg && <div style={{ fontSize: 11.5, color: C.dim, marginTop: 10 }}>{msg}</div>}
+      <div style={{ fontSize: 11, color: C.dimmer, marginTop: 10, lineHeight: 1.7 }}>
+        ※ iPhone / iPad は Safari の「ホーム画面に追加」でアプリを追加してから有効化してください（iOS 16.4 以降）。
+      </div>
+    </div>
+  );
+}
+
 // ── 画面：通知設定 ──
 function NotifySettingsScreen({ settings, setSettings, onBack }) {
   const set = (patch) => setSettings(s => ({ ...s, ...patch }));
@@ -2337,6 +2418,9 @@ function NotifySettingsScreen({ settings, setSettings, onBack }) {
           <Toggle on={settings.enabled} onClick={() => set({ enabled: !settings.enabled })} />
         </div>
       </div>
+
+      {/* この端末の通知許可（デスクトップ通知／スマホのプッシュ通知） */}
+      <PushCard />
 
       {settings.enabled && (
         <>
@@ -2394,7 +2478,7 @@ function NotifySettingsScreen({ settings, setSettings, onBack }) {
       )}
 
       <div style={{ fontSize: 11.5, color: C.dimmer, lineHeight: 1.7, padding: "0 4px" }}>
-        ※ プレビューでは設定と通知一覧の表示までを実装しています。実際の通知送信（アプリを閉じていても届くプッシュ通知）は、本番環境のプッシュ基盤（FCM/APNs）との接続が必要です。
+        ※ 上の「この端末の通知」を有効にすると、Web Push でデスクトップ通知・スマホのプッシュ通知が届きます（アプリを閉じていても配信）。配信のタイミングはここで設定したリード時間・静音時間に従います。
       </div>
     </div>
   );
@@ -3757,6 +3841,21 @@ function DetailPanel({ item, masters, onClose, onSave, onDelete, onDuplicate, on
 
 // ── ルート ──
 export default function ManageMateApp({ onSignOut, userEmail }) {
+  // Service Worker を起動時に登録（プッシュ通知の受信口）。
+  // 通知クリックでアプリが postMessage を受けたら該当画面へ戻せるよう受信も張る。
+  useEffect(() => {
+    registerServiceWorker();
+    if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+      const onMsg = (e) => {
+        if (e.data?.type === "notification-click") {
+          try { window.focus(); } catch {}
+        }
+      };
+      navigator.serviceWorker.addEventListener("message", onMsg);
+      return () => navigator.serviceWorker.removeEventListener("message", onMsg);
+    }
+  }, []);
+
   // items は Supabase と同期（フェーズ2: state → DB 永続化）
   const _itemsApi = useItems();
   const items = _itemsApi.items;
