@@ -54,6 +54,9 @@ const C = {
 
 // 区分による色分け（①）。ソフトパステル(セージ)：タスク=ソフトブルー/メモ=セージグリーン/スケジュール=ソフトゴールド
 const KIND_COLOR = { task: "#7C9CD1", memo: "#9FBF9C", event: "#E3C878" };
+// KIND_COLOR はパステルのため、その上に載る文字・アイコンに使う濃色派生。
+// 一覧の左端レール（区分色ベタ塗り）の中身はこちらを使う。
+const KIND_INK = { task: "#2F4F80", memo: "#3B6642", event: "#7F5F17" };
 const KIND_LABEL = { task: "タスク", memo: "メモ", event: "スケジュール" };
 
 // 色ルールに応じて item の表示色を返す
@@ -319,6 +322,16 @@ function ScreenHead({ title, sub, right }) {
 }
 
 // ── 一覧の1行（装飾をマスタから反映）──
+// 一覧の行。
+// 【区分の見分け方 — 案A「統一外形・レール可変」】
+//   カードの外形（角丸・高さ・余白）は3区分で完全に統一し、左端46pxの
+//   「レール」の中身だけを区分ごとに変える。レールの中身はその区分で
+//   最も重要な情報にしてある:
+//     スケジュール … 月/日（一覧で日付を探す手間をなくす）
+//     タスク       … 大きめの完了チェック（操作の的を広げる）
+//     メモ         … アイコン（＋完了チェック）
+//   レール色は KIND_COLOR、その上の文字・アイコンは濃色派生の KIND_INK。
+//   色ルール設定（分類ABC / 区分）に関わらず、レールは常に区分色を使う。
 function ItemRow({ it, masters, onToggle, onOpen, selected, colorMode = "class" }) {
   const a = lookup(masters, "A", it.A);
   const b = lookup(masters, "B", it.B);
@@ -329,30 +342,63 @@ function ItemRow({ it, masters, onToggle, onOpen, selected, colorMode = "class" 
   const accentSource = kindMode ? null : [a, b, c].find(x => x && x.deco.accent);
   const boldTitle = kindMode ? false : [a, b, c].some(x => x && x.deco.bold);
   const kindColor = KIND_COLOR[it.kind] || C.dim;
+  const kindInk = KIND_INK[it.kind] || C.paper;
 
-  const KindIcon = it.kind === "task" ? ListChecks : it.kind === "memo" ? StickyNote : Cal;
+  // レールに出す月日。"YYYY-MM-DD" / "YYYY-MM-DDTHH:mm" どちらも先頭10桁が日付
+  const railSrc = it.start || it.end || "";
+  const railDate = /^\d{4}-\d{2}-\d{2}/.test(railSrc)
+    ? { mo: Number(railSrc.slice(5, 7)), da: Number(railSrc.slice(8, 10)) }
+    : null;
+
+  // レール内の完了チェック。区分色の上に載るため配色は KIND_INK 基準
+  const RailCheck = ({ size }) => (
+    <button onClick={(e) => { e.stopPropagation(); onToggle(it.id); }}
+      aria-label={it.done ? "未完了に戻す" : "完了にする"}
+      style={{
+        width: size, height: size, borderRadius: size >= 20 ? 6 : 5, flexShrink: 0, padding: 0,
+        border: `2px solid ${it.done ? kindInk : kindInk + "AA"}`,
+        background: it.done ? kindInk : "#FFFFFF59",
+        display: "grid", placeItems: "center", cursor: "pointer",
+      }}>
+      {it.done && <Check size={size - 8} color="#FFFFFF" strokeWidth={3} />}
+    </button>
+  );
+
+  // レールの中身だけを区分ごとに差し替える（外形は共通）
+  const rail = it.kind === "event"
+    ? (railDate
+        ? (<>
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: kindInk, lineHeight: 1, opacity: .85 }}>{railDate.mo}月</span>
+            <span style={{ fontSize: 20, fontWeight: 700, color: kindInk, lineHeight: 1, marginTop: -1 }}>{railDate.da}</span>
+          </>)
+        : <Cal size={18} color={kindInk} />)
+    : it.kind === "task"
+      ? (<>
+          <RailCheck size={22} />
+          <ListChecks size={12} color={kindInk} style={{ opacity: .7 }} />
+        </>)
+      : (<>
+          <StickyNote size={18} color={kindInk} />
+          <RailCheck size={15} />
+        </>);
 
   return (
     <div onClick={() => onOpen(it.id)} style={{
-      display: "flex", gap: 10, padding: "9px 12px", borderRadius: 12, marginBottom: 6, cursor: "pointer", position: "relative", overflow: "hidden",
-      // 案5: 文字が乗る面は不透明カード（白）に統一。色味は左の縦バー＋枠線で示す（区分色モード）。
-      // 分類色モードの背景装飾(deco.bg)は従来どおり残す。
-      background: kindMode ? C.inkSoft : (bgSource ? `${bgSource.color}14` : C.inkSoft),
-      border: `1px solid ${selected ? C.gold : (kindMode ? kindColor + "44" : (bgSource ? bgSource.color + "44" : C.inkSofter))}`,
+      display: "flex", gap: 0, padding: 0, borderRadius: 12, marginBottom: 6, cursor: "pointer", position: "relative", overflow: "hidden",
+      // 文字が乗る面は不透明カード（白）。分類色モードの背景装飾(deco.bg)は従来どおり残す。
+      background: bgSource ? `${bgSource.color}14` : C.inkSoft,
+      // 枠線は常に区分色。選択時のみゴールドで上書き
+      border: `1px solid ${selected ? C.gold : kindColor + "66"}`,
       boxShadow: selected ? `0 0 0 1px ${C.gold}` : "none",
       opacity: it.done ? 0.5 : 1, transition: "border-color .15s, box-shadow .15s",
     }}>
-      {/* 区分モード：左端に区分色の縦バー */}
-      {kindMode && <div style={{ position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: kindColor }} />}
-      {/* 左端：区分アイコン（上）＋完了チェック（下）、上揃え */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, flexShrink: 0, marginTop: 1, marginLeft: kindMode ? 2 : 0 }}>
-        <KindIcon size={15} color={kindMode ? kindColor : C.dimmer} />
-        <button onClick={(e) => { e.stopPropagation(); onToggle(it.id); }} style={{ ...checkbox(it.done), marginTop: 0 }}>
-          {it.done && <Check size={13} color={C.onAccent} strokeWidth={3} />}
-        </button>
-      </div>
+      {/* 左端レール：幅・背景は全区分共通、中身だけ可変 */}
+      <div style={{
+        width: 46, flexShrink: 0, background: kindColor, padding: "8px 0",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5,
+      }}>{rail}</div>
 
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, padding: "9px 12px" }}>
         {/* タイトル ＋ 分類ラベルを横並び */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{
@@ -3564,11 +3610,101 @@ function DateTimeField({ start, end, onChange, notify, onNotifyChange }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// スマホのソフトキーボード対策
+//   100vh や position:fixed はキーボードが出ても縮まない（layout viewport 基準）。
+//   visualViewport から「実際に見えている高さ」と「下端の隠れ量」を取り、それで補正する。
+// ─────────────────────────────────────────────────────────────
+function useViewport() {
+  const [vp, setVp] = useState({ height: null, inset: 0 });
+  React.useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    let raf = 0;
+    const apply = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        // inset = キーボード等で隠れている下端の高さ
+        const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+        setVp({ height: vv.height, inset });
+        // iOS はフォーカス時にページ自体をずらすため元に戻す
+        if (window.scrollY !== 0) window.scrollTo(0, 0);
+      });
+    };
+    apply();
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    return () => {
+      cancelAnimationFrame(raf);
+      vv.removeEventListener("resize", apply);
+      vv.removeEventListener("scroll", apply);
+    };
+  }, []);
+  return vp;
+}
+
+// textarea 内のカーソル位置（要素上端からの px）を、同じ書式の影要素で実測する。
+// textarea には「カーソルの座標」を返す API がないため、この方法で求める。
+function caretTop(el) {
+  try {
+    const cs = window.getComputedStyle(el);
+    const mirror = document.createElement("div");
+    const s = mirror.style;
+    s.position = "absolute"; s.top = "0"; s.left = "-9999px";
+    s.visibility = "hidden"; s.whiteSpace = "pre-wrap"; s.wordBreak = "break-word";
+    s.width = el.clientWidth + "px";
+    ["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing",
+     "paddingTop", "paddingLeft", "paddingRight", "borderTopWidth", "textTransform"]
+      .forEach(k => { s[k] = cs[k]; });
+    mirror.textContent = String(el.value ?? "").slice(0, el.selectionStart ?? 0);
+    const marker = document.createElement("span");
+    marker.textContent = "​";      // 幅ゼロの目印。この位置＝カーソル位置
+    mirror.appendChild(marker);
+    document.body.appendChild(mirror);
+    const top = marker.offsetTop;
+    document.body.removeChild(mirror);
+    return top;
+  } catch { return 0; }
+}
+
+// 直近のスクロール可能な祖先を返す（詳細シート本体や入力画面のスクロール領域）
+function scrollParent(el) {
+  let p = el?.parentElement;
+  while (p) {
+    const oy = window.getComputedStyle(p).overflowY;
+    if ((oy === "auto" || oy === "scroll") && p.scrollHeight > p.clientHeight) return p;
+    p = p.parentElement;
+  }
+  return null;
+}
+
+// カーソル行がキーボードに隠れていたら、見える位置までスクロールして追従させる
+function scrollCaretIntoView(el) {
+  if (!el || !el.isConnected) return;
+  const vv = window.visualViewport;
+  const cs = window.getComputedStyle(el);
+  const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.6;
+  const rect = el.getBoundingClientRect();
+  const y = rect.top + caretTop(el) - el.scrollTop;          // カーソル行の上端（画面座標）
+  const vTop = vv ? vv.offsetTop : 0;
+  const vBottom = vTop + (vv ? vv.height : window.innerHeight);
+  const margin = lh + 16;                                     // 1行分＋余白は必ず空ける
+  let delta = 0;
+  if (y + lh > vBottom - margin) delta = y + lh - (vBottom - margin);
+  else if (y < vTop + 8) delta = y - (vTop + 8);
+  if (!delta) return;
+  const sp = scrollParent(el);
+  if (sp) sp.scrollTop += delta;
+  else window.scrollBy(0, delta);
+}
+
 // 自動で高さが伸びるテキストエリア。
 //  rows    … 最小高さ（既定の表示行数）
 //  maxRows … 高さ上限（この行数を超えたら固定して内部スクロール）。未指定なら無制限。
 //  それ以外の props（onKeyDown 等）は textarea へ透過。
-function AutoTextarea({ value, onChange, rows = 3, maxRows, placeholder, style, ...rest }) {
+// スマホでは長文入力時にカーソルがキーボードに隠れるため、入力・フォーカス・
+// キーボード開閉のたびにカーソル行を見える位置へスクロールする。
+function AutoTextarea({ value, onChange, rows = 3, maxRows, placeholder, style, onFocus, onSelect, ...rest }) {
   const ref = useRef(null);
   const resize = (el) => {
     if (!el) return;
@@ -3586,6 +3722,37 @@ function AutoTextarea({ value, onChange, rows = 3, maxRows, placeholder, style, 
   };
   // 描画前に高さを確定してチラつき／スクロール飛びを防止（onChange と二重実行しない）
   React.useLayoutEffect(() => { resize(ref.current); }, [value]);
+
+  // 入力で高さが変わった直後にカーソル行を追う（フォーカス中のみ）
+  React.useEffect(() => {
+    if (document.activeElement !== ref.current) return;
+    const id = requestAnimationFrame(() => scrollCaretIntoView(ref.current));
+    return () => cancelAnimationFrame(id);
+  }, [value]);
+
+  // キーボードの開閉（visualViewport のリサイズ）でも位置を取り直す
+  React.useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onVvResize = () => {
+      if (document.activeElement !== ref.current) return;
+      setTimeout(() => scrollCaretIntoView(ref.current), 60);
+    };
+    vv.addEventListener("resize", onVvResize);
+    return () => vv.removeEventListener("resize", onVvResize);
+  }, []);
+
+  // フォーカス直後はキーボードのせり上がりアニメーションを待ってから補正
+  const handleFocus = (e) => {
+    setTimeout(() => scrollCaretIntoView(ref.current), 350);
+    onFocus?.(e);
+  };
+  // 矢印キーやタップでのカーソル移動にも追従
+  const handleSelect = (e) => {
+    requestAnimationFrame(() => scrollCaretIntoView(ref.current));
+    onSelect?.(e);
+  };
+
   return (
     <textarea
       {...rest}
@@ -3594,6 +3761,8 @@ function AutoTextarea({ value, onChange, rows = 3, maxRows, placeholder, style, 
       rows={rows}
       placeholder={placeholder}
       onChange={onChange}
+      onFocus={handleFocus}
+      onSelect={handleSelect}
       style={{ ...style, overflow: "hidden", boxSizing: "border-box" }}
     />
   );
@@ -3743,6 +3912,7 @@ function DetailPanel({ item, masters, onClose, onSave, onDelete, onDuplicate, on
   const [zoomBusy, setZoomBusy] = useState(false);
   const [zoomErr, setZoomErr] = useState("");
   const fileInput = useRef(null);
+  const vp = useViewport();   // スマホのキーボード分だけシートを持ち上げるため
   React.useEffect(() => { setDraft(item); }, [item.id]);
 
   const set = (patch) => setDraft(d => ({ ...d, ...patch }));
@@ -3759,9 +3929,12 @@ function DetailPanel({ item, masters, onClose, onSave, onDelete, onDuplicate, on
   }
 
   // wide=true: 右パネル / false: 下からのシート
+  // シートは position:fixed のためキーボードが出ると裏に隠れる。visualViewport の
+  // 隠れ量（inset）だけ底を持ち上げ、高さも見えている範囲に収める。
   const shell = wide
     ? { width: 380, flexShrink: 0, borderLeft: `1px solid ${C.inkSofter}`, height: "100%", display: "flex", flexDirection: "column", background: C.ink }
-    : { position: "fixed", left: 0, right: 0, bottom: 0, maxHeight: "88vh", borderRadius: "20px 20px 0 0",
+    : { position: "fixed", left: 0, right: 0, bottom: vp.inset,
+        maxHeight: vp.height ? Math.round(vp.height * 0.92) : "88vh", borderRadius: "20px 20px 0 0",
         border: `1px solid ${C.inkSofter}`, display: "flex", flexDirection: "column", background: C.ink, zIndex: 50,
         boxShadow: "0 -12px 40px rgba(37,48,36,.22)", maxWidth: 440, margin: "0 auto" };
 
@@ -3992,6 +4165,9 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
   };
 
   const selected = items.find(i => i.id === selectedId) || null;
+  // スマホでキーボードが出ると 100vh は縮まないので、実際に見えている高さを使う
+  const vp = useViewport();
+  const appHeight = vp.height ? vp.height + "px" : "100vh";
 
   const nav = [
     { id: "home", label: "ホーム", icon: Home },
@@ -4003,13 +4179,13 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
   ];
 
   return (
-    <div style={{ height: "100vh", overflow: "hidden", background: C.ink, display: "flex", justifyContent: "center",
+    <div style={{ height: appHeight, overflow: "hidden", background: C.ink, display: "flex", justifyContent: "center",
       fontFamily: "'Hiragino Sans','Yu Gothic',system-ui,sans-serif" }}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} .spin{animation:spin 1s linear infinite}`}</style>
       {/* 広い画面：左サイドナビ＋ワイド本文。狭い画面：中央1カラム＋下タブ */}
-      <div style={{ display: "flex", width: "100%", maxWidth: wide ? (selected ? 1400 : 1160) : 440, transition: "max-width .2s", height: "100vh" }}>
+      <div style={{ display: "flex", width: "100%", maxWidth: wide ? (selected ? 1400 : 1160) : 440, transition: "max-width .2s", height: "100%" }}>
         {wide && (
-          <aside style={{ width: 224, flexShrink: 0, height: "100vh", background: C.inkSoft, borderRight: `1px solid ${C.inkSofter}`, display: "flex", flexDirection: "column", padding: "18px 14px" }}>
+          <aside style={{ width: 224, flexShrink: 0, height: "100%", background: C.inkSoft, borderRight: `1px solid ${C.inkSofter}`, display: "flex", flexDirection: "column", padding: "18px 14px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 6px 18px" }}>
               <Logo size={34} />
               <div>
@@ -4037,7 +4213,7 @@ export default function ManageMateApp({ onSignOut, userEmail }) {
             </button>
           </aside>
         )}
-        <div style={{ flex: 1, minWidth: 0, height: "100vh", overflow: "hidden",
+        <div style={{ flex: 1, minWidth: 0, height: "100%", overflow: "hidden",
           background: `radial-gradient(120% 40% at 50% 0%, #FFFFFF 0%, ${C.ink} 60%)`,
           display: "flex", flexDirection: "column" }}>
 
