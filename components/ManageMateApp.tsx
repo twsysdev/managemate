@@ -193,11 +193,36 @@ function fmtDT(v) {
   const [, mo, da] = d.split("-");
   return `${parseInt(mo)}/${parseInt(da)}${t ? " " + t : ""}`;
 }
+// 日付部分 "YYYY-MM-DD" と時刻部分 "HH:mm"（時刻を持たない＝終日なら ""）
+const dtDate = (v) => (v || "").slice(0, 10);
+const dtTime = (v) => { const s = v || ""; const i = s.indexOf("T"); return i >= 0 ? s.slice(i + 1, i + 6) : ""; };
+
+// 日時をミリ秒に。終日（時刻なし）は 00:00 として扱う
+const dtMs = (v) => v ? new Date(`${dtDate(v)}T${dtTime(v) || "00:00"}:00`).getTime() : null;
+// v を delta ミリ秒ずらす。元が終日なら日付のみ、時刻ありなら時刻付きで返す
+function shiftDT(v, delta) {
+  if (!v) return v;
+  const d = new Date(dtMs(v) + delta);
+  const p = (n) => String(n).padStart(2, "0");
+  const day = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return dtTime(v) ? `${day}T${p(d.getHours())}:${p(d.getMinutes())}` : day;
+}
+
+// 一覧の日時表示：「開始日時 〜 終了日時」。
+//   ・同日なら終了側の日付を省略      … 7/24 15:00 〜 16:30
+//   ・日をまたぐ時だけ終了側にも日付   … 8/1 10:00 〜 8/3 17:00
+//     （＝終了側に日付が付いていれば「またぐ予定」だと表示だけで分かる）
+//   ・開始のみ … 7/24 15:00 ／ 終了のみ（タスクの期日など）… 〜 7/31
 function dueLabel(it) {
-  // 一覧の簡易表示：終了(期日)を優先、なければ開始
-  if (it.end) return fmtDT(it.end);
-  if (it.start) return fmtDT(it.start);
-  return "";
+  const s = it.start, e = it.end;
+  if (!s && !e) return "";
+  if (s && !e) return fmtDT(s);
+  if (!s && e) return `〜 ${fmtDT(e)}`;
+  if (dtDate(s) === dtDate(e)) {
+    const te = dtTime(e);
+    return te ? `${fmtDT(s)} 〜 ${te}` : fmtDT(s);
+  }
+  return `${fmtDT(s)} 〜 ${fmtDT(e)}`;
 }
 
 // ── ヘルパ：マスタからラベル情報を引く ──
@@ -344,11 +369,12 @@ function ItemRow({ it, masters, onToggle, onOpen, selected, colorMode = "class" 
   const kindColor = KIND_COLOR[it.kind] || C.dim;
   const kindInk = KIND_INK[it.kind] || C.paper;
 
-  // レールに出す月日。"YYYY-MM-DD" / "YYYY-MM-DDTHH:mm" どちらも先頭10桁が日付
+  // レールに出す月日と開始時刻。"YYYY-MM-DD" / "YYYY-MM-DDTHH:mm" どちらも先頭10桁が日付
   const railSrc = it.start || it.end || "";
   const railDate = /^\d{4}-\d{2}-\d{2}/.test(railSrc)
     ? { mo: Number(railSrc.slice(5, 7)), da: Number(railSrc.slice(8, 10)) }
     : null;
+  const railTime = dtTime(railSrc);   // "" なら終日
 
   // レール内の完了チェック。区分色の上に載るため配色は KIND_INK 基準
   const RailCheck = ({ size }) => (
@@ -370,6 +396,12 @@ function ItemRow({ it, masters, onToggle, onOpen, selected, colorMode = "class" 
         ? (<>
             <span style={{ fontSize: 9.5, fontWeight: 700, color: kindInk, lineHeight: 1, opacity: .85 }}>{railDate.mo}月</span>
             <span style={{ fontSize: 20, fontWeight: 700, color: kindInk, lineHeight: 1, marginTop: -1 }}>{railDate.da}</span>
+            {/* 開始時刻。時刻を持たない予定は「終日」を出して行数を揃える */}
+            <span style={{
+              fontSize: 9.5, fontWeight: 700, color: kindInk, lineHeight: 1,
+              width: 32, textAlign: "center", paddingTop: 3, marginTop: 1,
+              borderTop: `1px solid ${kindInk}59`,
+            }}>{railTime || "終日"}</span>
           </>)
         : <Cal size={18} color={kindInk} />)
     : it.kind === "task"
@@ -395,7 +427,7 @@ function ItemRow({ it, masters, onToggle, onOpen, selected, colorMode = "class" 
       {/* 左端レール：幅・背景は全区分共通、中身だけ可変 */}
       <div style={{
         width: 46, flexShrink: 0, background: kindColor, padding: "8px 0",
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5,
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
       }}>{rail}</div>
 
       <div style={{ flex: 1, minWidth: 0, padding: "9px 12px" }}>
@@ -3546,36 +3578,124 @@ const localToday = () => {
 //  ・終日チェックと同じ行の右側に「通知」プルダウン（アイコンのみ・省スペース）を配置。
 //    onNotifyChange を渡したときだけ表示（メモなど通知対象外では省略）。
 //  ・時刻は15分刻みのセレクトで選択（終日OFF時）。
+// 【開始・終了の連動ルール（docs/date-clear-spec.html）】
+//   R1  両方あり／開始を変更 … 差分を維持して終了を自動シフト（予定を「動かす」）
+//   R2  両方あり／終了を変更 … 終了のみ変更（予定の「長さを変える」）。開始は動かさない
+//   R3  開始のみ／終了にフォーカス … 開始の値を終了へセット
+//   R4  終了のみ／開始にフォーカス … 終了の値を開始へセット
+//   R5  終了 < 開始 … 自動修正せず警告＋ワンタップ修正
+//   R6  両方空から開始を入力 … 終了は空のまま（勝手に埋めない）
+//   R7  終日ON  … 時刻を落とす。落とす直前の時刻は退避
+//   R8  終日OFF … 退避した時刻を復元（無ければ 09:00 / 10:00）
+//   R9  ✕ … その行を日付・時刻ごとクリア。連動は発火させない
+//   R10 R9でクリアした欄は、以降フォーカスしても R3/R4 を発火させない
+//       （＝消したそばから復活する、を防ぐ。値が再び入るか両方空になれば解除）
+//   R11 時刻セレクトの "--:--" … 時刻だけ消して日付を残す
+//  連動を一括で止めるトグルは置かない。R2・元に戻す・R9/R10 で個別に回避できるため。
 function DateTimeField({ start, end, onChange, notify, onNotifyChange }) {
   const allDay = !((start || "").includes("T") || (end || "").includes("T"));
   const showNotify = typeof onNotifyChange === "function";
+
+  const keepT = useRef(null);                       // R7/R8：終日ONで落とした時刻
+  const [noAutoS, setNoAutoS] = useState(false);    // R10：開始の自動セット抑止
+  const [noAutoE, setNoAutoE] = useState(false);    // R10：終了の自動セット抑止
+  const [undoSnap, setUndoSnap] = useState(null);   // 「元に戻す」用の直前値
+  const [notice, setNotice] = useState("");
+
+  // R10 の解除条件：その欄に値が入った／別アイテムに切り替わって両方空になった
+  useEffect(() => { if (start) setNoAutoS(false); }, [start]);
+  useEffect(() => { if (end) setNoAutoE(false); }, [end]);
+  useEffect(() => { if (!start && !end) { setNoAutoS(false); setNoAutoE(false); } }, [start, end]);
+
+  const snap = () => setUndoSnap({ start, end, noAutoS, noAutoE });
+  const undo = () => {
+    if (!undoSnap) return;
+    onChange(undoSnap.start, undoSnap.end);
+    setNoAutoS(undoSnap.noAutoS); setNoAutoE(undoSnap.noAutoE);
+    setUndoSnap(null); setNotice("");
+  };
+
   const setAllDay = (v) => {
+    setNotice(""); snap();
     if (v) {
-      onChange(start ? start.slice(0, 10) : "", end ? end.slice(0, 10) : "");
+      // R7：復元用に時刻を退避してから日付のみにする
+      keepT.current = { s: dtTime(start) || "09:00", e: dtTime(end) || "10:00" };
+      onChange(dtDate(start), dtDate(end));
     } else {
-      onChange(start ? start.slice(0, 10) + "T09:00" : "", end ? end.slice(0, 10) + "T10:00" : "");
+      // R8：退避した時刻を復元
+      const k = keepT.current || { s: "09:00", e: "10:00" };
+      onChange(start ? dtDate(start) + "T" + k.s : "", end ? dtDate(end) + "T" + k.e : "");
     }
   };
+
   const datePart = (v) => (v || "").slice(0, 10);
   const timePart = (v) => { const s = v || ""; const i = s.indexOf("T"); return i >= 0 ? s.slice(i + 1, i + 6) : ""; };
   const combine = (d, t) => (d || t) ? `${d || localToday()}T${t || "00:00"}` : "";
   // 現在値が15分グリッド外なら候補の先頭に足して選択可能にする
   const timeOpts = (cur) => (cur && !TIME_OPTIONS.includes(cur)) ? [cur, ...TIME_OPTIONS] : TIME_OPTIONS;
 
-  const renderRow = (lab, val, apply) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+  // R1：開始の変更。両方に値があるときだけ終了を同じ差分だけずらす
+  const applyStart = (v) => {
+    if (start && end && v) {
+      const delta = dtMs(v) - dtMs(start);
+      if (delta) {
+        snap();
+        const shifted = shiftDT(end, delta);
+        setNotice(`終了を ${fmtDT(end)} → ${fmtDT(shifted)} に連動しました`);
+        onChange(v, shifted);
+        return;
+      }
+    }
+    setNotice(""); onChange(v, end);
+  };
+  // R2：終了の変更。開始は動かさない
+  const applyEnd = (v) => { setNotice(""); onChange(start, v); };
+
+  // R3 / R4：空の側にフォーカスしたとき、もう片方の値を初期値としてセット
+  const focusStart = () => {
+    if (noAutoS || start || !end) return;
+    snap(); setNotice("開始に終了の値をセットしました"); onChange(end, end);
+  };
+  const focusEnd = () => {
+    if (noAutoE || end || !start) return;
+    snap(); setNotice("終了に開始の値をセットしました"); onChange(start, start);
+  };
+
+  // R9：行ごとクリア。連動させず、R10 の抑止を立てる
+  const clearStart = () => { snap(); setNoAutoS(true); setNotice("開始をクリアしました"); onChange("", end); };
+  const clearEnd = () => { snap(); setNoAutoE(true); setNotice("終了をクリアしました"); onChange(start, ""); };
+
+  const clearBtn = (onClick, title) => (
+    <button onClick={onClick} title={title} style={{
+      width: 28, height: 32, flexShrink: 0, borderRadius: 8, padding: 0,
+      border: `1px solid ${C.inkSofter}`, background: C.ink, color: C.dimmer,
+      display: "grid", placeItems: "center", cursor: "pointer",
+    }}><X size={13} /></button>
+  );
+
+  const renderRow = (lab, val, apply, onFocus, onClear) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
       <span style={{ fontSize: 11, color: C.dimmer, width: 30, flexShrink: 0 }}>{lab}</span>
       {allDay
-        ? <input type="date" value={datePart(val)} onChange={e => apply(e.target.value)} style={dtStyle} />
+        ? <input type="date" value={datePart(val)} onFocus={onFocus} onChange={e => apply(e.target.value)} style={dtStyle} />
         : <>
-            <input type="date" value={datePart(val)} onChange={e => apply(combine(e.target.value, timePart(val) || "00:00"))} style={{ ...dtStyle, flex: 1 }} />
-            <select value={timePart(val)} onChange={e => apply(combine(datePart(val), e.target.value))} style={{ ...dtStyle, width: 92, flexShrink: 0, cursor: "pointer" }}>
-              {!timePart(val) && <option value="">--:--</option>}
+            <input type="date" value={datePart(val)} onFocus={onFocus}
+              onChange={e => apply(combine(e.target.value, timePart(val) || "00:00"))} style={{ ...dtStyle, flex: 1 }} />
+            {/* R11：先頭の "--:--" は常時表示。選ぶと時刻だけ消えて日付が残る */}
+            <select value={timePart(val)} onFocus={onFocus}
+              onChange={e => apply(e.target.value === "" ? datePart(val) : combine(datePart(val), e.target.value))}
+              style={{ ...dtStyle, width: 88, flexShrink: 0, cursor: "pointer" }}>
+              <option value="">--:--</option>
               {timeOpts(timePart(val)).map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </>}
+      {/* R9：値があるときだけクリアボタン */}
+      {val ? clearBtn(onClear, `${lab}をクリア`) : <span style={{ width: 28, flexShrink: 0 }} />}
     </div>
   );
+
+  // R5：逆転の検知（自動修正はしない）
+  const reversed = start && end && dtMs(end) < dtMs(start);
 
   return (
     <div style={{ border: `1px solid ${C.inkSofter}`, borderRadius: 12, padding: 10, display: "flex", flexDirection: "column", gap: 8, background: C.inkSoft }}>
@@ -3603,9 +3723,37 @@ function DateTimeField({ start, end, onChange, notify, onNotifyChange }) {
       </div>
       {/* 開始・終了 */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {renderRow("開始", start, (v) => onChange(v, end))}
-        {renderRow("終了", end, (v) => onChange(start, v))}
+        {renderRow("開始", start, applyStart, focusStart, clearStart)}
+        {renderRow("終了", end, applyEnd, focusEnd, clearEnd)}
       </div>
+
+      {/* R5：逆転の警告。自動では直さず、ワンタップ修正だけ提示する */}
+      {reversed && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: C.dawn,
+          background: C.dawn + "14", border: `1px solid ${C.dawn}44`, borderRadius: 9, padding: "7px 10px" }}>
+          終了が開始より前です
+          <button onClick={() => { snap(); setNotice(""); onChange(start, start); }}
+            style={{ marginLeft: "auto", flexShrink: 0, fontSize: 11, padding: "3px 9px", borderRadius: 7,
+              border: `1px solid ${C.dawn}66`, background: C.inkSoft, color: C.dawn, cursor: "pointer" }}>
+            開始に合わせる
+          </button>
+        </div>
+      )}
+
+      {/* 連動・クリアで値が変わったときの通知＋元に戻す */}
+      {notice && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "#8A6E28",
+          background: C.accent2 + "14", border: `1px solid ${C.accent2}55`, borderRadius: 9, padding: "7px 10px" }}>
+          {notice}
+          {undoSnap && (
+            <button onClick={undo}
+              style={{ marginLeft: "auto", flexShrink: 0, fontSize: 11, padding: "3px 9px", borderRadius: 7,
+                border: `1px solid ${C.accent2}77`, background: C.inkSoft, color: "#8A6E28", cursor: "pointer" }}>
+              元に戻す
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
